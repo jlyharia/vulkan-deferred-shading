@@ -5,33 +5,31 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include <iostream>
 #include "App.hpp"
 
 #include <stdexcept>
 
-void App::run() {
-    initWindow();
+App::App(uint32_t width, uint32_t height, const char *title)
+    : width_(width), height_(height), title_(title) {
+}
 
-    // Create Vulkan context after window exists
-    vulkanContext_ = new VulkanContext(window_);
-
-    mainLoop();
-    cleanup();
+App::~App() {
+    vulkanContext_.reset(); // Vulkan RAII cleanup
+    if (window_) glfwDestroyWindow(window_);
+    glfwTerminate();
 }
 
 void App::initWindow() {
-    if (!glfwInit()) {
-        throw std::runtime_error("Failed to initialize GLFW");
-    }
+    if (!glfwInit()) throw std::runtime_error("Failed to init GLFW");
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-    window_ = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan-Deferred-Shading", nullptr, nullptr);
-    if (!window_) {
-        throw std::runtime_error("Failed to create GLFW window");
-    }
+    window_ = glfwCreateWindow(width_, height_, title_, nullptr, nullptr);
+    if (!window_) throw std::runtime_error("Failed to create GLFW window");
+
+    // Create Vulkan context after window is ready
+    vulkanContext_ = std::make_unique<VulkanContext>(window_);
 }
 
 void App::mainLoop() {
@@ -40,14 +38,7 @@ void App::mainLoop() {
     }
 }
 
-void App::cleanup() {
-    delete vulkanContext_;
-    vulkanContext_ = nullptr;
-
-    if (window_) {
-        glfwDestroyWindow(window_);
-        window_ = nullptr;
-    }
-
-    glfwTerminate();
+void App::run() {
+    initWindow();
+    mainLoop();
 }

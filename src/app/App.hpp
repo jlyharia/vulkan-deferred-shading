@@ -3,27 +3,27 @@
 //
 
 #pragma once
-
 #include <GLFW/glfw3.h>
+#include <memory>
 #include "vulkan/VulkanContext.hpp"
 
 class App {
 public:
-    App() = default;
-    ~App() = default;
+    App(int width, int height, const char *title);
+
+    ~App();
 
     void run();
 
 private:
+    int width_;
+    int height_;
+    const char *title_;
+
+    GLFWwindow *window_ = nullptr;
+    std::unique_ptr<VulkanContext> vulkanContext_;
+
     void initWindow();
+
     void mainLoop();
-    void cleanup();
-
-    GLFWwindow* window_ = nullptr;
-    VulkanContext* vulkanContext_ = nullptr;
-
-    const int WIDTH = 800;
-    const int HEIGHT = 600;
 };
-
-// vulkan clean up order -- Pipelines → Framebuffers → Swapchain → Device → Instance → Window

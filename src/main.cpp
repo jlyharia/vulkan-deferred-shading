@@ -5,7 +5,8 @@
 #include "app/App.hpp"
 
 int main() {
-    App app;
+    App app(800, 600, "Vulkan Deferred Renderer");
+
     try {
         app.run();
     } catch (const std::exception &e) {

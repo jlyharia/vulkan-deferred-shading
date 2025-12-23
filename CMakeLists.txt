@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ------------------------------------------------------------
 # Packages
 # ------------------------------------------------------------
+# Use VULKAN_SDK environment variable if set
+
 find_package(Vulkan REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -21,6 +23,8 @@ add_executable(defer_render
         src/app/App.hpp
         src/vulkan/VulkanContext.cpp
         src/vulkan/VulkanContext.hpp
+        src/vulkan/Validation.cpp
+        src/vulkan/Validation.hpp
 )
 
 # ------------------------------------------------------------
