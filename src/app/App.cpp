@@ -9,12 +9,12 @@
 
 #include <stdexcept>
 
-App::App(uint32_t width, uint32_t height, const char *title)
+App::App(int width, int height, const char *title)
     : width_(width), height_(height), title_(title) {
 }
 
 App::~App() {
-    vulkanContext_.reset(); // Vulkan RAII cleanup
+    vulkanContext_.reset(); // Vulkan RAII cleanup, // calls ~VulkanContext()
     if (window_) glfwDestroyWindow(window_);
     glfwTerminate();
 }
@@ -29,7 +29,7 @@ void App::initWindow() {
     if (!window_) throw std::runtime_error("Failed to create GLFW window");
 
     // Create Vulkan context after window is ready
-    vulkanContext_ = std::make_unique<VulkanContext>(window_);
+    vulkanContext_ = std::make_unique<VulkanContext>(window_, true);
 }
 
 void App::mainLoop() {

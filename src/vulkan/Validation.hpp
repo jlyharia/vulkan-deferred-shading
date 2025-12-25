@@ -12,7 +12,7 @@ public:
     ~Validation() = default;
 
     bool isEnabled() const { return enableLayers_; }
-    const std::vector<const char *> &getLayers() const { return validationLayers_; }
+    const std::vector<const char *> &getValidationLayers() const { return validationLayers_; }
 
     // Populate VkDebugUtilsMessengerCreateInfoEXT
     void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo);
