@@ -25,6 +25,8 @@ add_executable(defer_render
         src/vulkan/VulkanContext.hpp
         src/vulkan/Validation.cpp
         src/vulkan/Validation.hpp
+        src/vulkan/Swapchain.cpp
+        src/vulkan/Swapchain.hpp
 )
 
 # ------------------------------------------------------------

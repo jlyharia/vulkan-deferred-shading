@@ -7,6 +7,8 @@
 #include <iostream>
 #include <set>
 #include <stdexcept>
+
+#include "Swapchain.hpp"
 #include "Validation.hpp"
 
 VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
@@ -16,6 +18,16 @@ VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
     }
 
     createInstance();
+    uint32_t apiVersion = 0;
+    if (vkEnumerateInstanceVersion(&apiVersion) == VK_SUCCESS) {
+        uint32_t major = VK_VERSION_MAJOR(apiVersion);
+        uint32_t minor = VK_VERSION_MINOR(apiVersion);
+        uint32_t patch = VK_VERSION_PATCH(apiVersion);
+        std::cout << "Vulkan API version supported by the driver: "
+                << major << "." << minor << "." << patch << std::endl;
+    } else {
+        std::cout << "Failed to get Vulkan instance version!" << std::endl;
+    }
 
     if (validation_->isEnabled()) {
         setupDebugMessenger();
@@ -142,10 +154,33 @@ void VulkanContext::pickPhysicalDevice() {
 bool VulkanContext::isDeviceSuitable(VkPhysicalDevice device) {
     QueueFamilyIndices indices = findQueueFamilies(device);
 
-    return indices.isComplete();
+    bool extensionsSupported = checkDeviceExtensionSupport(device);
+
+    bool swapChainAdequate = false;
+    if (extensionsSupported) {
+        swapChainAdequate = Swapchain::isDeviceAdequate(device, surface_);
+    }
+
+    return indices.isComplete() && extensionsSupported && swapChainAdequate;
 }
 
-VulkanContext::QueueFamilyIndices VulkanContext::findQueueFamilies(VkPhysicalDevice device) {
+bool VulkanContext::checkDeviceExtensionSupport(VkPhysicalDevice device) {
+    uint32_t extensionCount;
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+    std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+    for (const auto &extension: availableExtensions) {
+        requiredExtensions.erase(extension.extensionName);
+    }
+
+    return requiredExtensions.empty();
+}
+
+QueueFamilyIndices VulkanContext::findQueueFamilies(VkPhysicalDevice device) const {
     QueueFamilyIndices indices;
 
     uint32_t queueFamilyCount = 0;
@@ -206,7 +241,9 @@ void VulkanContext::createLogicalDevice() {
 
     createInfo.pEnabledFeatures = &deviceFeatures;
 
-    createInfo.enabledExtensionCount = 0;
+
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
     if (validation_->isEnabled()) {
         createInfo.enabledLayerCount = static_cast<uint32_t>(validation_->getValidationLayers().size());
@@ -228,3 +265,8 @@ void VulkanContext::createSurface() {
         throw std::runtime_error("failed to create window surface!");
     }
 }
+
+
+const std::vector<const char *> VulkanContext::deviceExtensions = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+};

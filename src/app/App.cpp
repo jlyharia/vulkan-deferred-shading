@@ -9,11 +9,14 @@
 
 #include <stdexcept>
 
+#include "vulkan/Swapchain.hpp"
+
 App::App(int width, int height, const char *title)
     : width_(width), height_(height), title_(title) {
 }
 
 App::~App() {
+    swapchain_.reset();
     vulkanContext_.reset(); // Vulkan RAII cleanup, // calls ~VulkanContext()
     if (window_) glfwDestroyWindow(window_);
     glfwTerminate();
@@ -30,6 +33,7 @@ void App::initWindow() {
 
     // Create Vulkan context after window is ready
     vulkanContext_ = std::make_unique<VulkanContext>(window_, true);
+    swapchain_ = std::make_unique<Swapchain>(*vulkanContext_, window_);
 }
 
 void App::mainLoop() {
