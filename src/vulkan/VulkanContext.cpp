@@ -5,6 +5,7 @@
 #include "VulkanContext.hpp"
 
 #include <iostream>
+#include <set>
 #include <stdexcept>
 #include "Validation.hpp"
 
@@ -19,11 +20,14 @@ VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
     if (validation_->isEnabled()) {
         setupDebugMessenger();
     }
+
+    createSurface();
     pickPhysicalDevice();
     createLogicalDevice();
 }
 
 VulkanContext::~VulkanContext() {
+    vkDestroySurfaceKHR(instance_, surface_, nullptr);
     if (this->vkDevice_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(vkDevice_);
         vkDestroyDevice(vkDevice_, nullptr);
@@ -156,9 +160,17 @@ VulkanContext::QueueFamilyIndices VulkanContext::findQueueFamilies(VkPhysicalDev
             indices.graphicsFamily = i;
         }
 
+        VkBool32 presentSupport = false;
+        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &presentSupport);
+
+        if (presentSupport) {
+            indices.presentFamily = i;
+        }
+
         if (indices.isComplete()) {
             break;
         }
+
         i++;
     }
 
@@ -168,21 +180,29 @@ VulkanContext::QueueFamilyIndices VulkanContext::findQueueFamilies(VkPhysicalDev
 void VulkanContext::createLogicalDevice() {
     QueueFamilyIndices indices = findQueueFamilies(physicalDevice_);
 
-    VkDeviceQueueCreateInfo queueCreateInfo{};
-    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
-    queueCreateInfo.queueCount = 1;
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    std::set<uint32_t> uniqueQueueFamilies = {
+        indices.graphicsFamily.value(),
+        indices.presentFamily.value()
+    };
 
     float queuePriority = 1.0f;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    for (uint32_t queueFamily: uniqueQueueFamilies) {
+        VkDeviceQueueCreateInfo queueCreateInfo{};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueFamilyIndex = queueFamily;
+        queueCreateInfo.queueCount = 1;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+        queueCreateInfos.push_back(queueCreateInfo);
+    }
 
     VkPhysicalDeviceFeatures deviceFeatures{};
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 
-    createInfo.pQueueCreateInfos = &queueCreateInfo;
-    createInfo.queueCreateInfoCount = 1;
+    createInfo.pQueueCreateInfos = queueCreateInfos.data();
+    createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
 
     createInfo.pEnabledFeatures = &deviceFeatures;
 
@@ -200,4 +220,11 @@ void VulkanContext::createLogicalDevice() {
     }
 
     vkGetDeviceQueue(vkDevice_, indices.graphicsFamily.value(), 0, &graphicsQueue_);
+    vkGetDeviceQueue(vkDevice_, indices.presentFamily.value(), 0, &presentQueue_);
+}
+
+void VulkanContext::createSurface() {
+    if (glfwCreateWindowSurface(instance_, window_, nullptr, &surface_) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create window surface!");
+    }
 }

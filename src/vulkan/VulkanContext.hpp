@@ -11,8 +11,24 @@
 #include "Validation.hpp"
 
 /**
- * VulkanContext = VkInstance + VkPhysicalDevice + VkDevice + VkQueues
+ * VulkanContext
+ *
+ * Owns the foundational, long-lived Vulkan objects that typically live
+ * for the entire lifetime of the application.
+ *
+ * Responsibilities:
+ *  - VkInstance
+ *  - VkDebugUtilsMessengerEXT (validation / debug callbacks)
+ *  - VkSurfaceKHR (window-system integration; required for device selection)
+ *  - VkPhysicalDevice (GPU selection)
+ *  - VkDevice (logical device)
+ *  - VkQueue(s) (graphics / present)
+ *  - Validation layer setup and lifetime management
+ *
+ * This class intentionally does NOT own short-lived or resize-dependent
+ * resources such as swapchains, framebuffers, or render targets.
  */
+
 class VulkanContext {
 public:
     VulkanContext(GLFWwindow *window, bool enableValidation = true);
@@ -32,6 +48,7 @@ private:
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     std::unique_ptr<Validation> validation_;
     VkDevice vkDevice_;
+    VkSurfaceKHR surface_;
     VkQueue graphicsQueue_;
     VkQueue presentQueue_;
 
@@ -54,11 +71,14 @@ private:
 
     struct QueueFamilyIndices {
         std::optional<uint32_t> graphicsFamily;
+        std::optional<uint32_t> presentFamily;
 
         bool isComplete() {
-            return graphicsFamily.has_value();
+            return graphicsFamily.has_value() && presentFamily.has_value();
         }
     };
 
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
+
+    void createSurface();
 };
