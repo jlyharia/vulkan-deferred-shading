@@ -8,7 +8,7 @@
 #include <memory>
 #include <optional>
 #include <vector>
-#include "Validation.hpp"
+class Validation;
 
 /**
  * VulkanContext
@@ -29,6 +29,15 @@
  * resources such as swapchains, framebuffers, or render targets.
  */
 
+struct QueueFamilyIndices {
+    std::optional<uint32_t> graphicsFamily;
+    std::optional<uint32_t> presentFamily;
+
+    bool isComplete() {
+        return graphicsFamily.has_value() && presentFamily.has_value();
+    }
+};
+
 class VulkanContext {
 public:
     VulkanContext(GLFWwindow *window, bool enableValidation = true);
@@ -40,6 +49,22 @@ public:
     VulkanContext &operator=(const VulkanContext &) = delete;
 
     [[nodiscard]] VkInstance getInstance() const { return instance_; }
+
+    static const std::vector<const char *> deviceExtensions;
+
+    /**
+     *
+     * @return Logical Device
+     */
+    [[nodiscard]] VkDevice getDevice() const { return vkDevice_; }
+    /**
+     *
+     * @return Physical Device
+     */
+    [[nodiscard]] VkPhysicalDevice getPhysicalDevice() const { return physicalDevice_; }
+    [[nodiscard]] VkSurfaceKHR getSurface() const { return surface_; }
+
+    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
 
 private:
     GLFWwindow *window_;
@@ -69,16 +94,7 @@ private:
 
     bool isDeviceSuitable(VkPhysicalDevice device);
 
-    struct QueueFamilyIndices {
-        std::optional<uint32_t> graphicsFamily;
-        std::optional<uint32_t> presentFamily;
-
-        bool isComplete() {
-            return graphicsFamily.has_value() && presentFamily.has_value();
-        }
-    };
-
-    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
-
     void createSurface();
+
+    bool checkDeviceExtensionSupport(VkPhysicalDevice device);
 };
