@@ -2,7 +2,7 @@
 #include <cstdlib>
 #include <exception>
 
-#include "app/App.hpp"
+#include "app/app.hpp"
 
 int main() {
     App app(800, 600, "Vulkan Deferred Renderer");

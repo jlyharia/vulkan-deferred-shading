@@ -10,13 +10,15 @@
 
 class VulkanContext;
 
-class Swapchain {
+class SwapChain {
 public:
-    Swapchain(VulkanContext &context, GLFWwindow *window) : context_(context), window_(window) {
+    SwapChain(VulkanContext &context, GLFWwindow *window)
+        : context_(context), window_(window) {
         createSwapChain();
+        createImageViews();
     }
 
-    ~Swapchain();
+    ~SwapChain();
 
     void recreate(); // call on resize
 
@@ -28,6 +30,10 @@ public:
 
     static bool isDeviceAdequate(VkPhysicalDevice device, VkSurfaceKHR surface);
 
+    VkFormat getSwapChainImageFormat() const { return swapChainImageFormat_; }
+
+    void createFramebuffers(VkRenderPass renderPass);
+
 private:
     VulkanContext &context_;
     VkSwapchainKHR swapChain_ = VK_NULL_HANDLE;
@@ -35,8 +41,14 @@ private:
     VkFormat swapChainImageFormat_ = VK_FORMAT_UNDEFINED;
     VkExtent2D swapChainExtent_ = {0, 0};
     GLFWwindow *window_;
+    std::vector<VkImageView> swapChainImageViews_;
+    std::vector<VkFramebuffer> swapChainFramebuffers_;
+
+
+    void createImageViews();
 
     void createSwapChain();
+
 
     static SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface);
 
