@@ -8,7 +8,7 @@
 #include <set>
 #include <stdexcept>
 
-#include "Swapchain.hpp"
+#include "swap_chain.hpp"
 #include "Validation.hpp"
 
 VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
@@ -158,7 +158,7 @@ bool VulkanContext::isDeviceSuitable(VkPhysicalDevice device) {
 
     bool swapChainAdequate = false;
     if (extensionsSupported) {
-        swapChainAdequate = Swapchain::isDeviceAdequate(device, surface_);
+        swapChainAdequate = SwapChain::isDeviceAdequate(device, surface_);
     }
 
     return indices.isComplete() && extensionsSupported && swapChainAdequate;

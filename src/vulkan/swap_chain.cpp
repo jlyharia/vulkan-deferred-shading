@@ -2,7 +2,7 @@
 // Created by johnny on 12/25/25.
 //
 
-#include "Swapchain.hpp"
+#include "swap_chain.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -33,19 +33,27 @@ namespace {
     }
 }
 
-Swapchain::~Swapchain() {
+SwapChain::~SwapChain() {
+    for (auto framebuffer: swapChainFramebuffers_) {
+        vkDestroyFramebuffer(context_.getDevice(), framebuffer, nullptr);
+    }
+
+    for (auto imageView: swapChainImageViews_) {
+        // 1️Destroy image views first
+        vkDestroyImageView(context_.getDevice(), imageView, nullptr);
+    }
     if (swapChain_ != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(context_.getDevice(), swapChain_, nullptr);
     }
 }
 
 
-bool Swapchain::isDeviceAdequate(VkPhysicalDevice device, VkSurfaceKHR surface) {
+bool SwapChain::isDeviceAdequate(VkPhysicalDevice device, VkSurfaceKHR surface) {
     SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device, surface);
     return !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
 }
 
-Swapchain::SwapChainSupportDetails Swapchain::querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface) {
+SwapChain::SwapChainSupportDetails SwapChain::querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface) {
     SwapChainSupportDetails details;
 
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
@@ -70,7 +78,7 @@ Swapchain::SwapChainSupportDetails Swapchain::querySwapChainSupport(VkPhysicalDe
 }
 
 
-void Swapchain::createSwapChain() {
+void SwapChain::createSwapChain() {
     SwapChainSupportDetails swapChainSupport = querySwapChainSupport(context_.getPhysicalDevice(),
                                                                      context_.getSurface());
 
@@ -125,7 +133,7 @@ void Swapchain::createSwapChain() {
 }
 
 
-VkExtent2D Swapchain::chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
+VkExtent2D SwapChain::chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
     if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return capabilities.currentExtent;
     } else {
@@ -143,5 +151,54 @@ VkExtent2D Swapchain::chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilit
                                          capabilities.maxImageExtent.height);
 
         return actualExtent;
+    }
+}
+
+void SwapChain::createImageViews() {
+    swapChainImageViews_.resize(swapChainImages_.size());
+
+    for (size_t i = 0; i < swapChainImages_.size(); i++) {
+        VkImageViewCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        createInfo.image = swapChainImages_[i];
+        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        createInfo.format = swapChainImageFormat_;
+        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(context_.getDevice(), &createInfo, nullptr, &swapChainImageViews_[i]) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create image views!");
+        }
+    }
+}
+
+void SwapChain::createFramebuffers(VkRenderPass renderPass) {
+    swapChainFramebuffers_.resize(swapChainImageViews_.size());
+
+    for (size_t i = 0; i < swapChainImageViews_.size(); i++) {
+        VkImageView attachments[] = {
+            swapChainImageViews_[i]
+        };
+
+        VkFramebufferCreateInfo framebufferInfo{};
+        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferInfo.renderPass = renderPass;
+        framebufferInfo.attachmentCount = 1;
+        framebufferInfo.pAttachments = attachments;
+        framebufferInfo.width = swapChainExtent_.width;
+        framebufferInfo.height = swapChainExtent_.height;
+        framebufferInfo.layers = 1;
+
+        if (vkCreateFramebuffer(context_.getDevice(), &framebufferInfo, nullptr, &swapChainFramebuffers_[i]) !=
+            VK_SUCCESS) {
+            throw std::runtime_error("failed to create framebuffer!");
+        }
     }
 }
