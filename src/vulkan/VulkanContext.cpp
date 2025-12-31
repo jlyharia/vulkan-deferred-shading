@@ -23,7 +23,7 @@ VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
         uint32_t major = VK_VERSION_MAJOR(apiVersion);
         uint32_t minor = VK_VERSION_MINOR(apiVersion);
         uint32_t patch = VK_VERSION_PATCH(apiVersion);
-        std::cout << "Vulkan API version supported by the driver: "
+        std::cout << "-- Vulkan API version supported by the driver: "
                 << major << "." << minor << "." << patch << std::endl;
     } else {
         std::cout << "Failed to get Vulkan instance version!" << std::endl;

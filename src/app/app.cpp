@@ -44,7 +44,7 @@ void App::initVulkan() {
     swapchain_ = std::make_unique<SwapChain>(*vulkanContext_, window_);
 
     // Step 2: Create RenderPass using that Format
-    renderPass_ = std::make_unique<RenderPass>(*vulkanContext_, swapchain_->getSwapChainImageFormat());
+    renderPass_ = std::make_unique<RenderPass>(*vulkanContext_, swapchain_->getFormat());
 
     // Step 3: INVOKE HERE
     // Now that both the Images (in swapchain) and the Blueprint (renderpass) exist,
