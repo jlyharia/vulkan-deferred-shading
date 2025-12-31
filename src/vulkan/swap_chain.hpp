@@ -20,6 +20,11 @@ public:
 
     ~SwapChain();
 
+    // Disable copying - Swapchains manage heavy GPU resources
+    SwapChain(const SwapChain &) = delete;
+
+    SwapChain &operator=(const SwapChain &) = delete;
+
     void recreate(); // call on resize
 
     struct SwapChainSupportDetails {
@@ -30,7 +35,13 @@ public:
 
     static bool isDeviceAdequate(VkPhysicalDevice device, VkSurfaceKHR surface);
 
-    VkFormat getSwapChainImageFormat() const { return swapChainImageFormat_; }
+    // Getters
+    VkFormat getFormat() const { return swapChainImageFormat_; }
+    VkExtent2D getExtent() const { return swapChainExtent_; }
+    VkSwapchainKHR getHandle() const { return swapChain_; }
+    const std::vector<VkImageView> &getImageViews() const { return swapChainImageViews_; }
+
+    std::vector<VkFramebuffer> getFramebuffers() { return swapChainFramebuffers_; }
 
     void createFramebuffers(VkRenderPass renderPass);
 

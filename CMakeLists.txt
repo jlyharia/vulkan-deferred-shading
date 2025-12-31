@@ -33,6 +33,8 @@ add_executable(defer_render
         src/vulkan/graphics_pipeline.hpp
         src/vulkan/render_pass.cpp
         src/vulkan/render_pass.hpp
+        src/renderer/renderer.cpp
+        src/renderer/renderer.hpp
 )
 
 # ------------------------------------------------------------

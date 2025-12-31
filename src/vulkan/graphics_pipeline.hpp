@@ -21,6 +21,8 @@ public:
 
     ~GraphicsPipeline();
 
+    VkPipeline getPipeline() { return graphicsPipeline_; }
+
 private:
     VulkanContext &context_;
     SwapChain &swapChain_;

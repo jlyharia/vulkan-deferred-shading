@@ -47,3 +47,9 @@ defer_render/
         ├── deferred_app.cpp
         ├── gbuffer.hpp     # MRT (Multiple Render Target) management
         └── gbuffer.cpp
+```
+
+## Todo
+1. Delete vulkan resources per frame.
+2. Move vulkan resource destroy into queue.
+3. Show frame rate on screen UI.
