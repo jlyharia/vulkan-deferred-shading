@@ -35,6 +35,7 @@ add_executable(defer_render
         src/vulkan/render_pass.hpp
         src/renderer/renderer.cpp
         src/renderer/renderer.hpp
+        src/common/config.hpp
 )
 
 # ------------------------------------------------------------

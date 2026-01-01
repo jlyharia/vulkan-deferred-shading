@@ -9,6 +9,7 @@
 
 #include <stdexcept>
 
+#include "renderer/renderer.hpp"
 #include "vulkan/graphics_pipeline.hpp"
 #include "vulkan/render_pass.hpp"
 #include "vulkan/swap_chain.hpp"
@@ -18,6 +19,7 @@ App::App(int width, int height, const char *title)
 }
 
 App::~App() {
+    renderer_.reset();
     graphicsPipeline_.reset();
     renderPass_.reset();
     swapchain_.reset();
@@ -53,12 +55,23 @@ void App::initVulkan() {
 
     // Step 4: Create Pipeline
     graphicsPipeline_ = std::make_unique<GraphicsPipeline>(*vulkanContext_, *swapchain_, renderPass_->getRenderPass());
+
+    renderer_ = std::make_unique<Renderer>(*vulkanContext_, *swapchain_, *renderPass_, *graphicsPipeline_);
 }
 
-void App::mainLoop() const {
+void App::mainLoop() {
     while (!glfwWindowShouldClose(window_)) {
         glfwPollEvents();
+        drawFrame();
     }
+
+    // Wait for GPU to finish before exiting to avoid crashing during cleanup
+    vkDeviceWaitIdle(vulkanContext_->getDevice());
+}
+
+void App::drawFrame() {
+    // 1. Tell the renderer to execute a frame
+    renderer_->drawFrame();
 }
 
 void App::run() {

@@ -45,6 +45,8 @@ public:
 
     void createFramebuffers(VkRenderPass renderPass);
 
+    [[nodiscard]] const std::vector<VkImage> &getImages() const { return swapChainImages_; }
+
 private:
     VulkanContext &context_;
     VkSwapchainKHR swapChain_ = VK_NULL_HANDLE;
