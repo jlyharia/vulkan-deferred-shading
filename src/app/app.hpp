@@ -8,6 +8,7 @@
 
 #include "vulkan/VulkanContext.hpp"
 
+class Renderer;
 class RenderPass;
 class GraphicsPipeline;
 class SwapChain;
@@ -84,9 +85,13 @@ private:
     // Depends on the Render Pass
     std::unique_ptr<GraphicsPipeline> graphicsPipeline_;
 
+    std::unique_ptr<Renderer> renderer_;
+
     void initWindow();
 
-    void mainLoop() const;
+    void mainLoop();
 
     void initVulkan();
+
+    void drawFrame();
 };

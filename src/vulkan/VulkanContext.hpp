@@ -66,6 +66,9 @@ public:
 
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
 
+    [[nodiscard]] VkQueue getGraphicsQueue() const { return graphicsQueue_; }
+    [[nodiscard]] VkQueue getPresentQueue() const { return presentQueue_; }
+
 private:
     GLFWwindow *window_;
     VkInstance instance_ = VK_NULL_HANDLE;
