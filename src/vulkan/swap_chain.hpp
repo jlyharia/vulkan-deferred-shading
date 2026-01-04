@@ -14,8 +14,15 @@ class SwapChain {
 public:
     SwapChain(VulkanContext &context, GLFWwindow *window)
         : context_(context), window_(window) {
-        createSwapChain();
-        createImageViews();
+        // createSwapChain();
+        // createImageViews();
+        init();
+    }
+
+    void recreate(VkRenderPass renderPass) {
+        cleanup(); // Clean up old handles
+        init(); // Create new handles with new window size
+        createFramebuffers(renderPass); // Re-link to the renderpass
     }
 
     ~SwapChain();
@@ -25,7 +32,11 @@ public:
 
     SwapChain &operator=(const SwapChain &) = delete;
 
-    void recreate(); // call on resize
+    // The logic to "reset" the swapchain
+
+
+    void cleanup(); // Logic moved out of destructor
+
 
     struct SwapChainSupportDetails {
         VkSurfaceCapabilitiesKHR capabilities;
@@ -57,6 +68,11 @@ private:
     std::vector<VkImageView> swapChainImageViews_;
     std::vector<VkFramebuffer> swapChainFramebuffers_;
 
+
+    void init() {
+        createSwapChain();
+        createImageViews();
+    }
 
     void createImageViews();
 

@@ -138,9 +138,9 @@ void VulkanContext::pickPhysicalDevice() {
     for (const auto &device: devices) {
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(device, &props);
-        std::cout << "checking physical device = " << props.deviceName << '\n';
+        // std::cout << "checking physical device = " << props.deviceName << '\n';
         if (isDeviceSuitable(device)) {
-            std::cout << "Selected physical device = " << props.deviceName << '\n';
+            std::cout << "-- Selected physical device = " << props.deviceName << '\n';
             physicalDevice_ = device;
             break;
         }

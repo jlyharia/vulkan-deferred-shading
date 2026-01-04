@@ -3,6 +3,7 @@
 //
 
 #pragma once
+#include <chrono>
 #include <GLFW/glfw3.h>
 #include <memory>
 
@@ -94,4 +95,19 @@ private:
     void initVulkan();
 
     void drawFrame();
+
+    bool framebufferResized = false;
+
+    static void framebufferResizeCallback(GLFWwindow *window, int width, int height);
+
+    void updateFrameTime(); // Our new extracted function
+
+    // State variables for time tracking
+    std::chrono::high_resolution_clock::time_point lastTime = std::chrono::high_resolution_clock::now();
+    float timer = 0.0f;
+    float deltaTime = 0.0f;
+
+    bool framebufferResized_ = false;
+
+    void processInput();
 };
