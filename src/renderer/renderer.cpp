@@ -147,15 +147,22 @@ void Renderer::createSyncObjects() {
     }
 }
 
-void Renderer::drawFrame() {
+void Renderer::drawFrame(bool framebufferResized) {
     vkWaitForFences(context_.getDevice(), 1, &inFlightFences_[currentFrame], VK_TRUE, UINT64_MAX);
     // vkResetFences(context_.getDevice(), 1, &inFlightFences_[currentFrame]);
 
     uint32_t imageIndex;
-    vkAcquireNextImageKHR(context_.getDevice(), swapChain_.getHandle(), UINT64_MAX,
+    VkResult acquireNextImageResult = vkAcquireNextImageKHR(context_.getDevice(), swapChain_.getHandle(), UINT64_MAX,
                           imageAvailableSemaphores_[currentFrame],
                           VK_NULL_HANDLE, &imageIndex);
 
+    if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreateSwapChain();
+        return;
+    }
+    if (acquireNextImageResult != VK_SUCCESS && acquireNextImageResult != VK_SUBOPTIMAL_KHR) {
+        throw std::runtime_error("failed to acquire swap chain image!");
+    }
     // 2. NEW: If this specific image is already in use by another frame, wait for it!
     if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
         vkWaitForFences(context_.getDevice(), 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
@@ -202,6 +209,40 @@ void Renderer::drawFrame() {
 
     presentInfo.pImageIndices = &imageIndex;
 
-    vkQueuePresentKHR(context_.getPresentQueue(), &presentInfo);
+
+    VkResult queuePresentResult = vkQueuePresentKHR(context_.getPresentQueue(), &presentInfo);
+
+    if (queuePresentResult == VK_ERROR_OUT_OF_DATE_KHR || queuePresentResult == VK_SUBOPTIMAL_KHR || framebufferResized) {
+        // framebufferResized = false;
+        recreateSwapChain();
+    } else if (queuePresentResult != VK_SUCCESS) {
+        throw std::runtime_error("failed to present swap chain image!");
+    }
     currentFrame = (currentFrame + 1) % engine::MAX_FRAMES_IN_FLIGHT;
+}
+
+void Renderer::recreateSwapChain() {
+    // 1. Handle Minimization (Pause the engine if width/height is 0)
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(window_, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(window_, &width, &height);
+        glfwWaitEvents();
+    }
+
+    // 2. Synchronize: Stop the GPU before we delete its tools
+    vkDeviceWaitIdle(context_.getDevice());
+
+    // 3. Cleanup size-dependent resources
+    // cleanupDepthResources();
+    // Framebuffers are cleaned inside SwapChain::cleanup() which we trigger next
+
+    // 4. Recreate SwapChain (This updates images and views)
+    swapChain_.recreate(renderPass_.getRenderPass());
+
+    // 5. Recreate Renderer resources with the NEW extent
+    // createDepthResources();
+
+    // Note: Since we use Dynamic State for Viewport/Scissor,
+    // we do NOT need to recreate the Pipeline!
 }

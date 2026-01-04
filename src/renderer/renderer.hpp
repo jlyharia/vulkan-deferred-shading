@@ -3,6 +3,7 @@
 //
 #pragma once
 #include <vector>
+#include <GLFW/glfw3.h>
 #include <vulkan/vulkan_core.h>
 
 class GraphicsPipeline;
@@ -15,8 +16,9 @@ public:
     Renderer(VulkanContext &context,
              SwapChain &swapChain,
              RenderPass &renderPass,
-             GraphicsPipeline &pipeline)
-        : context_(context), swapChain_(swapChain), renderPass_(renderPass), pipeline_(pipeline) {
+             GraphicsPipeline &pipeline,
+             GLFWwindow *window_)
+        : context_(context), swapChain_(swapChain), renderPass_(renderPass), pipeline_(pipeline), window_(window_) {
         // 1. The Pool must come first
         createCommandPool();
 
@@ -34,8 +36,9 @@ public:
 
     Renderer &operator=(const Renderer &) = delete;
 
-    void drawFrame(); // The main function called by App
+    void drawFrame(bool framebufferResized); // The main function called by App
 
+    void recreateSwapChain(); // call on resize
 private:
     void createCommandPool();
 
@@ -48,7 +51,7 @@ private:
     SwapChain &swapChain_;
     RenderPass &renderPass_;
     GraphicsPipeline &pipeline_;
-
+    GLFWwindow *window_;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> commandBuffers_;
 

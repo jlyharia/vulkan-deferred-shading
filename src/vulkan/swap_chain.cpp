@@ -5,7 +5,9 @@
 #include "swap_chain.hpp"
 
 #include <algorithm>
+#include <iostream>
 #include <limits>
+#include <ostream>
 #include <stdexcept>
 
 #include "VulkanContext.hpp"
@@ -23,30 +25,52 @@ namespace {
     }
 
     VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR> &availablePresentModes) {
-        for (const auto &availablePresentMode: availablePresentModes) {
-            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-                return availablePresentMode;
+        // 1. Try Mailbox (Best for uncapped FPS without tearing),
+        // Many GPU doesn't support mailbox
+        for (const auto &mode: availablePresentModes) {
+            if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                std::cout << "-- Present mode found: VK_PRESENT_MODE_MAILBOX_KHR" << std::endl;
+                return mode;
             }
         }
 
+        // 2. Try Immediate (Absolute fastest, but causes screen tearing)
+        for (const auto &mode: availablePresentModes) {
+            if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+                std::cout << "-- Present mode found: VK_PRESENT_MODE_IMMEDIATE_KHR" << std::endl;
+                return mode;
+            }
+        }
+
+        // 3. Fallback to FIFO (Always supported, locks to 60/144Hz)
+        std::cout << "-- Present mode default to: VK_PRESENT_MODE_FIFO_KHR" << std::endl;
         return VK_PRESENT_MODE_FIFO_KHR;
     }
 }
 
 SwapChain::~SwapChain() {
-    for (auto framebuffer: swapChainFramebuffers_) {
-        vkDestroyFramebuffer(context_.getDevice(), framebuffer, nullptr);
-    }
-
-    for (auto imageView: swapChainImageViews_) {
-        // 1️Destroy image views first
-        vkDestroyImageView(context_.getDevice(), imageView, nullptr);
-    }
-    if (swapChain_ != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(context_.getDevice(), swapChain_, nullptr);
-    }
+    cleanup();
 }
 
+void SwapChain::cleanup() {
+    // 1. Destroy Framebuffers first (they depend on ImageViews)
+    for (const auto framebuffer: swapChainFramebuffers_) {
+        vkDestroyFramebuffer(context_.getDevice(), framebuffer, nullptr);
+    }
+    swapChainFramebuffers_.clear();
+
+    // 2. Destroy Image Views
+    for (const auto imageView: swapChainImageViews_) {
+        vkDestroyImageView(context_.getDevice(), imageView, nullptr);
+    }
+    swapChainImageViews_.clear();
+
+    // 3. Destroy Swapchain (This also handles the images)
+    if (swapChain_ != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(context_.getDevice(), swapChain_, nullptr);
+        swapChain_ = VK_NULL_HANDLE;
+    }
+}
 
 bool SwapChain::isDeviceAdequate(VkPhysicalDevice device, VkSurfaceKHR surface) {
     SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device, surface);
