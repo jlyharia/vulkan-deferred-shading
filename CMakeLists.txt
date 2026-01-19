@@ -36,6 +36,7 @@ add_executable(defer_render
         src/renderer/renderer.cpp
         src/renderer/renderer.hpp
         src/common/config.hpp
+        src/renderer/Vertex.hpp
 )
 
 # ------------------------------------------------------------
