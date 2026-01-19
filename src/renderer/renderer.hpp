@@ -27,6 +27,9 @@ public:
 
         // 3. Sync objects are independent but needed for the first frame
         createSyncObjects();
+
+        createVertexBuffer();
+
     }
 
     ~Renderer();
@@ -45,8 +48,11 @@ private:
     void createCommandBuffers();
 
     void createSyncObjects(); // Semaphores and Fences
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const;
 
+    void createVertexBuffer();
+
+    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     VulkanContext &context_;
     SwapChain &swapChain_;
     RenderPass &renderPass_;
@@ -63,4 +69,7 @@ private:
     uint32_t currentFrame = 0;
 
     std::vector<VkFence> imagesInFlight;
+    VkBuffer vertexBuffer_;
+    VkDeviceMemory vertexBufferMemory_;
+
 };
