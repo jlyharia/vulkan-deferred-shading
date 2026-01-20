@@ -37,6 +37,7 @@ add_executable(defer_render
         src/renderer/renderer.hpp
         src/common/config.hpp
         src/renderer/Vertex.hpp
+        src/external/vma_impl.cpp
 )
 
 # ------------------------------------------------------------
@@ -46,6 +47,7 @@ target_include_directories(defer_render
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/external
+        "$ENV{VULKAN_SDK}/include"
 )
 
 # ------------------------------------------------------------

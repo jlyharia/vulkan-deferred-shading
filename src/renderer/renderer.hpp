@@ -4,21 +4,25 @@
 #pragma once
 #include <vector>
 #include <GLFW/glfw3.h>
+#include <vma/vk_mem_alloc.h>
 #include <vulkan/vulkan_core.h>
-
 class GraphicsPipeline;
 class RenderPass;
 class SwapChain;
 class VulkanContext;
 
-class Renderer {
+class Renderer
+{
 public:
-    Renderer(VulkanContext &context,
-             SwapChain &swapChain,
-             RenderPass &renderPass,
-             GraphicsPipeline &pipeline,
-             GLFWwindow *window_)
-        : context_(context), swapChain_(swapChain), renderPass_(renderPass), pipeline_(pipeline), window_(window_) {
+    Renderer(VulkanContext& context,
+             SwapChain& swapChain,
+             RenderPass& renderPass,
+             GraphicsPipeline& pipeline,
+             GLFWwindow* window_)
+        : context_(context), swapChain_(swapChain), renderPass_(renderPass), pipeline_(pipeline), window_(window_)
+    {
+        // create vma allocator
+        createAllocator();
         // 1. The Pool must come first
         createCommandPool();
 
@@ -29,15 +33,14 @@ public:
         createSyncObjects();
 
         createVertexBuffer();
-
     }
 
     ~Renderer();
 
     // Disable copying: You can't "copy" a GPU renderer
-    Renderer(const Renderer &) = delete;
+    Renderer(const Renderer&) = delete;
 
-    Renderer &operator=(const Renderer &) = delete;
+    Renderer& operator=(const Renderer&) = delete;
 
     void drawFrame(bool framebufferResized); // The main function called by App
 
@@ -52,12 +55,18 @@ private:
 
     void createVertexBuffer();
 
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+                      VmaMemoryUsage vmaUsage,
+                      VkBuffer& buffer, VmaAllocation& allocation) const;
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+
+    void createAllocator();
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
-    VulkanContext &context_;
-    SwapChain &swapChain_;
-    RenderPass &renderPass_;
-    GraphicsPipeline &pipeline_;
-    GLFWwindow *window_;
+    VulkanContext& context_;
+    SwapChain& swapChain_;
+    RenderPass& renderPass_;
+    GraphicsPipeline& pipeline_;
+    GLFWwindow* window_;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> commandBuffers_;
 
@@ -69,7 +78,8 @@ private:
     uint32_t currentFrame = 0;
 
     std::vector<VkFence> imagesInFlight;
-    VkBuffer vertexBuffer_;
-    VkDeviceMemory vertexBufferMemory_;
-
+    VkBuffer vertexBuffer_ = VK_NULL_HANDLE;
+    // VkDeviceMemory vertexBufferMemory_ = VK_NULL_HANDLE;
+    VmaAllocation vertexBufferAllocation_;
+    VmaAllocator vmaAllocator;
 };
