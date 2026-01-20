@@ -37,13 +37,15 @@ Renderer::~Renderer()
     // 1. Ensure GPU is idle before we start deleting things
     vkDeviceWaitIdle(context_.getDevice());
 
-    if (vertexBuffer_ != VK_NULL_HANDLE)
-    {
-        vkDestroyBuffer(context_.getDevice(), vertexBuffer_, nullptr);
+    // This replaces BOTH vkDestroyBuffer and vkFreeMemory
+    if (vertexBuffer_ != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(vmaAllocator, vertexBuffer_, vertexBufferAllocation_);
     }
-    if (vertexBufferMemory_ != VK_NULL_HANDLE)
-    {
-        vkFreeMemory(context_.getDevice(), vertexBufferMemory_, nullptr);
+
+    // 3. Destroy the allocator itself
+    // Note: All VMA buffers MUST be destroyed before this call
+    if (vmaAllocator != VK_NULL_HANDLE) {
+        vmaDestroyAllocator(vmaAllocator);
     }
     // 2. Destroy Fences (Per Frame Slot)
     for (const auto& fence : inFlightFences_)
@@ -303,46 +305,94 @@ void Renderer::recreateSwapChain()
     // we do NOT need to recreate the Pipeline!
 }
 
+
 void Renderer::createVertexBuffer()
+{
+    VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+
+    // --- STEP 1: Create Staging Buffer (CPU Visible) ---
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAllocation;
+    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAllocation);
+
+    // --- STEP 2: Map and Copy Data ---
+    void* data;
+    vmaMapMemory(vmaAllocator, stagingAllocation, &data);
+    memcpy(data, vertices.data(), (size_t)bufferSize);
+    vmaUnmapMemory(vmaAllocator, stagingAllocation);
+
+    // --- STEP 3: Create Vertex Buffer (GPU Local) ---
+    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                 VMA_MEMORY_USAGE_GPU_ONLY, vertexBuffer_, vertexBufferAllocation_);
+
+    // --- STEP 4: Copy from Staging to GPU ---
+    copyBuffer(stagingBuffer, vertexBuffer_, bufferSize);
+
+    // --- STEP 5: Clean up Staging ---
+    vmaDestroyBuffer(vmaAllocator, stagingBuffer, stagingAllocation);
+}
+
+
+void Renderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+                            VmaMemoryUsage vmaUsage,
+                            VkBuffer& buffer, VmaAllocation& allocation) const
 {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = sizeof(vertices[0]) * vertices.size();
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(context_.getDevice(), &bufferInfo, nullptr, &vertexBuffer_) != VK_SUCCESS)
+    VmaAllocationCreateInfo allocInfo = {};
+    allocInfo.usage = vmaUsage;
+
+    assert(vmaAllocator != VK_NULL_HANDLE && "Allocator was never initialized!");
+    assert(context_.getDevice() != VK_NULL_HANDLE && "Device handle is null!");
+    // This one call replaces vkCreateBuffer, vkGetBufferMemoryRequirements,
+    // findMemoryType, vkAllocateMemory, and vkBindBufferMemory.
+    if (vmaCreateBuffer(vmaAllocator, &bufferInfo, &allocInfo, &buffer, &allocation, nullptr) != VK_SUCCESS)
     {
-        throw std::runtime_error("failed to create vertex buffer!");
+        throw std::runtime_error("failed to create buffer with VMA!");
     }
-
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(context_.getDevice(), vertexBuffer_, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits,
-                                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    if (vkAllocateMemory(context_.getDevice(), &allocInfo, nullptr, &vertexBufferMemory_) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to allocate vertex buffer memory!");
-    }
-
-    vkBindBufferMemory(context_.getDevice(), vertexBuffer_, vertexBufferMemory_, 0);
-    // It is now time to copy the vertex data to the buffer.
-    void* data;
-    vkMapMemory(context_.getDevice(), vertexBufferMemory_, 0, bufferInfo.size, 0, &data);
-    memcpy(data, vertices.data(), (size_t)bufferInfo.size);
-    vkUnmapMemory(context_.getDevice(), vertexBufferMemory_);
 }
 
-/**
- *
- * todo we may move memory to dedicate class
- */
+
+void Renderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+{
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = commandPool_;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(context_.getDevice(), &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    {
+        VkBufferCopy copyRegion{};
+        copyRegion.size = size;
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+    }
+    vkEndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    vkQueueSubmit(context_.getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(context_.getGraphicsQueue());
+
+    vkFreeCommandBuffers(context_.getDevice(), commandPool_, 1, &commandBuffer);
+}
+
+
 uint32_t Renderer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const
 {
     VkPhysicalDeviceMemoryProperties memProperties;
@@ -357,4 +407,28 @@ uint32_t Renderer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags pro
     }
 
     throw std::runtime_error("failed to find suitable memory type!");
+}
+
+
+void Renderer::createAllocator()
+{
+    VmaVulkanFunctions vulkanFunctions{};
+    vulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+    vulkanFunctions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
+
+    VmaAllocatorCreateInfo allocatorInfo{};
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    allocatorInfo.instance = context_.getInstance();
+    allocatorInfo.physicalDevice = context_.getPhysicalDevice();
+    allocatorInfo.device = context_.getDevice();
+    allocatorInfo.pVulkanFunctions = &vulkanFunctions;
+
+    VkResult res = vmaCreateAllocator(&allocatorInfo, &vmaAllocator);
+    if (res != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create VMA allocator!");
+    }
+    VmaAllocatorInfo info{};
+    vmaGetAllocatorInfo(vmaAllocator, &info);
+    assert(info.device == context_.getDevice());
 }
