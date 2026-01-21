@@ -38,15 +38,30 @@ Renderer::~Renderer()
     vkDeviceWaitIdle(context_.getDevice());
 
     // This replaces BOTH vkDestroyBuffer and vkFreeMemory
-    if (vertexBuffer_ != VK_NULL_HANDLE) {
+    if (vertexBuffer_ != VK_NULL_HANDLE)
+    {
+        // This frees BOTH the buffer and the memory allocation
         vmaDestroyBuffer(vmaAllocator, vertexBuffer_, vertexBufferAllocation_);
+        // Safety: set to null so you don't accidentally try to use it again
+        vertexBuffer_ = VK_NULL_HANDLE;
+        vertexBufferAllocation_ = nullptr;
     }
 
+    if (indexBuffer_ != VK_NULL_HANDLE)
+    {
+        // This frees BOTH the buffer and the memory allocation
+        vmaDestroyBuffer(vmaAllocator, indexBuffer_, indexBufferAllocation_);
+        // Safety: set to null so you don't accidentally try to use it again
+        indexBuffer_ = VK_NULL_HANDLE;
+        indexBufferAllocation_ = nullptr;
+    }
     // 3. Destroy the allocator itself
     // Note: All VMA buffers MUST be destroyed before this call
-    if (vmaAllocator != VK_NULL_HANDLE) {
+    if (vmaAllocator != VK_NULL_HANDLE)
+    {
         vmaDestroyAllocator(vmaAllocator);
     }
+
     // 2. Destroy Fences (Per Frame Slot)
     for (const auto& fence : inFlightFences_)
     {
@@ -145,8 +160,10 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
         VkBuffer vertexBuffers[] = {vertexBuffer_};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
+        // vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
-        vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
     }
     vkCmdEndRenderPass(commandBuffer);
 
@@ -333,6 +350,33 @@ void Renderer::createVertexBuffer()
     vmaDestroyBuffer(vmaAllocator, stagingBuffer, stagingAllocation);
 }
 
+void Renderer::createIndexBuffer()
+{
+    VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAllocation;
+    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAllocation);
+
+    void* data;
+    vmaMapMemory(vmaAllocator, stagingAllocation, &data);
+    memcpy(data, indices.data(), (size_t)bufferSize);
+    vmaUnmapMemory(vmaAllocator, stagingAllocation);
+
+
+    // --- STEP 3: Create Index Buffer (GPU Local) ---
+    createBuffer(bufferSize,
+             VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, // Use Index bit here
+             VMA_MEMORY_USAGE_GPU_ONLY,
+             indexBuffer_, indexBufferAllocation_);
+
+    // --- STEP 4: Copy from Staging to GPU ---
+    copyBuffer(stagingBuffer, indexBuffer_, bufferSize);
+
+    // --- STEP 5: Clean up Staging ---
+    vmaDestroyBuffer(vmaAllocator, stagingBuffer, stagingAllocation);
+}
 
 void Renderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                             VmaMemoryUsage vmaUsage,

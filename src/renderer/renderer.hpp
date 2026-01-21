@@ -33,6 +33,8 @@ public:
         createSyncObjects();
 
         createVertexBuffer();
+
+        createIndexBuffer();
     }
 
     ~Renderer();
@@ -54,7 +56,7 @@ private:
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const;
 
     void createVertexBuffer();
-
+    void createIndexBuffer();
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                       VmaMemoryUsage vmaUsage,
                       VkBuffer& buffer, VmaAllocation& allocation) const;
@@ -79,7 +81,10 @@ private:
 
     std::vector<VkFence> imagesInFlight;
     VkBuffer vertexBuffer_ = VK_NULL_HANDLE;
-    // VkDeviceMemory vertexBufferMemory_ = VK_NULL_HANDLE;
+   
     VmaAllocation vertexBufferAllocation_;
     VmaAllocator vmaAllocator;
+
+    VkBuffer indexBuffer_ = VK_NULL_HANDLE;
+    VmaAllocation indexBufferAllocation_;
 };
