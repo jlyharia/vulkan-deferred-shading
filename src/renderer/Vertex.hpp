@@ -5,12 +5,14 @@
 #include <vector>
 #include <array>
 
-struct Vertex {
+struct Vertex
+{
     glm::vec2 pos;
     glm::vec3 color;
 
     // Helper function to tell Vulkan how to read this struct
-    static VkVertexInputBindingDescription getBindingDescription() {
+    static VkVertexInputBindingDescription getBindingDescription()
+    {
         VkVertexInputBindingDescription bindingDescription{};
         // All of our per-vertex data is packed together in "one" array, so we're only going to have one binding.
         // For now we only have one Vertex contain pos and color
@@ -20,7 +22,8 @@ struct Vertex {
         return bindingDescription;
     }
 
-    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
+    {
         std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
 
         // Position: layout(location = 0)
@@ -41,9 +44,10 @@ struct Vertex {
 
 // Define your sample data here for now
 const std::vector<Vertex> vertices = {
-    {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
 };
 const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0
