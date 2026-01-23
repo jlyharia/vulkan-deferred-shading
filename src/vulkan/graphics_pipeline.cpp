@@ -11,15 +11,18 @@
 #include "VulkanContext.hpp"
 #include "renderer/Vertex.hpp"
 
-namespace {
-    std::vector<char> readFile(const std::string &filename) {
+namespace
+{
+    std::vector<char> readFile(const std::string& filename)
+    {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
-        if (!file.is_open()) {
+        if (!file.is_open())
+        {
             throw std::runtime_error("failed to open file!");
         }
 
-        size_t fileSize = (size_t) file.tellg();
+        size_t fileSize = (size_t)file.tellg();
         std::vector<char> buffer(fileSize);
 
         file.seekg(0);
@@ -31,12 +34,21 @@ namespace {
     }
 }
 
-GraphicsPipeline::~GraphicsPipeline() {
-    vkDestroyPipeline(context_.getDevice(), graphicsPipeline_, nullptr);
-    vkDestroyPipelineLayout(context_.getDevice(), pipelineLayout_, nullptr);
+GraphicsPipeline::~GraphicsPipeline()
+{
+    // destroy, FILO
+    if (graphicsPipeline_ != VK_NULL_HANDLE)
+    {
+        vkDestroyPipeline(context_.getDevice(), graphicsPipeline_, nullptr);
+    }
+    if (pipelineLayout_ != VK_NULL_HANDLE)
+    {
+        vkDestroyPipelineLayout(context_.getDevice(), pipelineLayout_, nullptr);
+    }
 }
 
-void GraphicsPipeline::createGraphicsPipeline() {
+void GraphicsPipeline::createGraphicsPipeline()
+{
     auto vertShaderCode = readFile("shaders/vert.spv");
     auto fragShaderCode = readFile("shaders/frag.spv");
 
@@ -85,7 +97,7 @@ void GraphicsPipeline::createGraphicsPipeline() {
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
@@ -95,7 +107,7 @@ void GraphicsPipeline::createGraphicsPipeline() {
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT
-                                          | VK_COLOR_COMPONENT_A_BIT;
+        | VK_COLOR_COMPONENT_A_BIT;
     colorBlendAttachment.blendEnable = VK_FALSE;
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
@@ -118,15 +130,6 @@ void GraphicsPipeline::createGraphicsPipeline() {
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
-    // create pipeline layout
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0;
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
-
-    if (vkCreatePipelineLayout(context_.getDevice(), &pipelineLayoutInfo, nullptr, &pipelineLayout_) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create pipeline layout!");
-    }
     // Create Graphic Pipeline
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -145,24 +148,39 @@ void GraphicsPipeline::createGraphicsPipeline() {
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
     if (vkCreateGraphicsPipelines(context_.getDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline_)
-        != VK_SUCCESS) {
+        != VK_SUCCESS)
+    {
         throw std::runtime_error("failed to create graphics pipeline!");
     }
     vkDestroyShaderModule(context_.getDevice(), fragShaderModule, nullptr);
     vkDestroyShaderModule(context_.getDevice(), vertShaderModule, nullptr);
 }
 
-VkShaderModule GraphicsPipeline::createShaderModule(const std::vector<char> &code) {
+VkShaderModule GraphicsPipeline::createShaderModule(const std::vector<char>& code)
+{
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
-    createInfo.pCode = reinterpret_cast<const uint32_t *>(code.data());
+    createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
 
     VkShaderModule shaderModule;
-    if (vkCreateShaderModule(context_.getDevice(), &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+    if (vkCreateShaderModule(context_.getDevice(), &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
+    {
         throw std::runtime_error("failed to create shaders module!");
     }
 
     return shaderModule;
 }
 
+void GraphicsPipeline::createPipelineLayout(VkDescriptorSetLayout dsLayout)
+{
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &dsLayout; // Pass the handle from Renderer
+
+    if (vkCreatePipelineLayout(context_.getDevice(), &pipelineLayoutInfo, nullptr, &pipelineLayout_) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create pipeline layout!");
+    }
+}
