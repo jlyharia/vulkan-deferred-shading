@@ -2,10 +2,15 @@
 // Created by johnny on 12/29/25.
 //
 
+#define GLM_FORCE_RADIANS
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include "renderer.hpp"
 
+#include <chrono>
 #include <cstring>
 
+#include "Uniform.hpp"
 #include "Vertex.hpp"
 #include "common/config.hpp"
 #include "vulkan/graphics_pipeline.hpp"
@@ -13,6 +18,30 @@
 #include "vulkan/swap_chain.hpp"
 #include "vulkan/VulkanContext.hpp"
 
+Renderer::Renderer(VulkanContext& context, SwapChain& swapChain, RenderPass& renderPass,
+                   GLFWwindow* window_)
+    : context_(context), swapChain_(swapChain), renderPass_(renderPass),
+       window_(window_)
+{
+    // 1. Core Memory & Commands
+    createAllocator();      // VMA should be first
+    createCommandPool();
+    createCommandBuffers();
+    createSyncObjects();
+
+    // // 2. Resource Layout (The Blueprint)
+    // // Note: Since you moved this to Renderer, call it here!
+    // createDescriptorSetLayout();
+    //
+    // // 3. Physical Data
+    // createVertexBuffer();
+    // createIndexBuffer();
+    // createUniformBuffers();
+    //
+    // // 4. Descriptor Management (The Connection)
+    // createDescriptorPool(); // MUST exist before Sets
+    // createDescriptorSets(); // MUST exist before recording commands
+}
 /**
 * In Vulkan, the specific order of destruction between a Semaphore and a Command Pool does not technically matter, as long as they are both destroyed after the GPU has finished using them.
 *
@@ -36,6 +65,24 @@ Renderer::~Renderer()
 {
     // 1. Ensure GPU is idle before we start deleting things
     vkDeviceWaitIdle(context_.getDevice());
+
+    vkDestroyDescriptorPool(context_.getDevice(), descriptorPool_, nullptr);
+
+    vkDestroyDescriptorSetLayout(context_.getDevice(), descriptorSetLayout_, nullptr);
+    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        // VMA automatically handles the Unmapping if you used
+        // VMA_ALLOCATION_CREATE_MAPPED_BIT.
+        if (uniformBuffers_[i] != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(vmaAllocator, uniformBuffers_[i], uniformBuffersAllocation_[i]);
+
+            // Safety: Clear the handles
+            uniformBuffers_[i] = VK_NULL_HANDLE;
+            uniformBuffersAllocation_[i] = nullptr;
+            uniformBuffersMapped_[i] = nullptr;
+        }
+    }
 
     // This replaces BOTH vkDestroyBuffer and vkFreeMemory
     if (vertexBuffer_ != VK_NULL_HANDLE)
@@ -86,6 +133,18 @@ Renderer::~Renderer()
     }
 }
 
+void Renderer::initResources(VkPipelineLayout pipelineLayout)
+{
+    activePipelineLayout_ = pipelineLayout; // Store for vkCmdBindDescriptorSets
+
+    createVertexBuffer();
+    createIndexBuffer();
+    createUniformBuffers();
+    createDescriptorPool();
+    createDescriptorSets();
+
+}
+
 void Renderer::createCommandPool()
 {
     QueueFamilyIndices queueFamilyIndices = context_.findQueueFamilies(
@@ -118,7 +177,7 @@ void Renderer::createCommandBuffers()
     }
 }
 
-void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const
+void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, VkPipeline pipeline, uint32_t imageIndex) const
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -141,7 +200,7 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
     // begin render pass
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     {
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.getPipeline());
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
         VkViewport viewport{};
         viewport.x = 0.0f;
@@ -161,9 +220,8 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
         vkCmdBindIndexBuffer(commandBuffer, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
-        // vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipelineLayout_, 0, 1, &descriptorSets_[currentFrame], 0, nullptr);
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-
     }
     vkCmdEndRenderPass(commandBuffer);
 
@@ -175,7 +233,7 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t image
 
 void Renderer::createSyncObjects()
 {
-    const uint32_t imageCount = static_cast<uint32_t>(swapChain_.getImages().size());
+    const auto imageCount = static_cast<uint32_t>(swapChain_.getImages().size());
 
     // 1. Resize all containers
     inFlightFences_.resize(engine::MAX_FRAMES_IN_FLIGHT);
@@ -212,7 +270,7 @@ void Renderer::createSyncObjects()
     }
 }
 
-void Renderer::drawFrame(bool framebufferResized)
+void Renderer::drawFrame(VkPipeline pipeline, bool framebufferResized)
 {
     vkWaitForFences(context_.getDevice(), 1, &inFlightFences_[currentFrame], VK_TRUE, UINT64_MAX);
     // vkResetFences(context_.getDevice(), 1, &inFlightFences_[currentFrame]);
@@ -231,6 +289,8 @@ void Renderer::drawFrame(bool framebufferResized)
     {
         throw std::runtime_error("failed to acquire swap chain image!");
     }
+
+    updateUniformBuffer(currentFrame);
     // 2. NEW: If this specific image is already in use by another frame, wait for it!
     if (imagesInFlight[imageIndex] != VK_NULL_HANDLE)
     {
@@ -244,7 +304,7 @@ void Renderer::drawFrame(bool framebufferResized)
 
     //--
     vkResetCommandBuffer(commandBuffers_[currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
-    recordCommandBuffer(commandBuffers_[currentFrame], imageIndex);
+    recordCommandBuffer(commandBuffers_[currentFrame], pipeline, imageIndex);
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -367,9 +427,9 @@ void Renderer::createIndexBuffer()
 
     // --- STEP 3: Create Index Buffer (GPU Local) ---
     createBuffer(bufferSize,
-             VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, // Use Index bit here
-             VMA_MEMORY_USAGE_GPU_ONLY,
-             indexBuffer_, indexBufferAllocation_);
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, // Use Index bit here
+                 VMA_MEMORY_USAGE_GPU_ONLY,
+                 indexBuffer_, indexBufferAllocation_);
 
     // --- STEP 4: Copy from Staging to GPU ---
     copyBuffer(stagingBuffer, indexBuffer_, bufferSize);
@@ -378,9 +438,40 @@ void Renderer::createIndexBuffer()
     vmaDestroyBuffer(vmaAllocator, stagingBuffer, stagingAllocation);
 }
 
-void Renderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+void Renderer::createUniformBuffers()
+{
+    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+    uniformBuffers_.resize(engine::MAX_FRAMES_IN_FLIGHT);
+    uniformBuffersAllocation_.resize(engine::MAX_FRAMES_IN_FLIGHT);
+    uniformBuffersMapped_.resize(engine::MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        VmaAllocationInfo allocInfo; // This will hold our pointer
+
+        createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VMA_MEMORY_USAGE_CPU_TO_GPU, // Optimized for CPU writes
+            uniformBuffers_[i],
+            uniformBuffersAllocation_[i],
+            VMA_ALLOCATION_CREATE_MAPPED_BIT, // Magic: Tells VMA to map it now
+            &allocInfo
+        );
+
+        // Store the pointer for easy memcpy later
+        uniformBuffersMapped_[i] = allocInfo.pMappedData;
+    }
+}
+
+void Renderer::createBuffer(VkDeviceSize size,
+                            VkBufferUsageFlags usage,
                             VmaMemoryUsage vmaUsage,
-                            VkBuffer& buffer, VmaAllocation& allocation) const
+                            VkBuffer& buffer,
+                            VmaAllocation& allocation,
+                            VmaAllocationCreateFlags vmaFlags, // Added: for flags like MAPPED
+                            VmaAllocationInfo* outAllocInfo) const
 {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -390,12 +481,13 @@ void Renderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 
     VmaAllocationCreateInfo allocInfo = {};
     allocInfo.usage = vmaUsage;
+    allocInfo.flags = vmaFlags;
 
     assert(vmaAllocator != VK_NULL_HANDLE && "Allocator was never initialized!");
     assert(context_.getDevice() != VK_NULL_HANDLE && "Device handle is null!");
     // This one call replaces vkCreateBuffer, vkGetBufferMemoryRequirements,
-    // findMemoryType, vkAllocateMemory, and vkBindBufferMemory.
-    if (vmaCreateBuffer(vmaAllocator, &bufferInfo, &allocInfo, &buffer, &allocation, nullptr) != VK_SUCCESS)
+    // , vkAllocateMemory, and vkBindBufferMemory.
+    if (vmaCreateBuffer(vmaAllocator, &bufferInfo, &allocInfo, &buffer, &allocation, outAllocInfo) != VK_SUCCESS)
     {
         throw std::runtime_error("failed to create buffer with VMA!");
     }
@@ -436,24 +528,6 @@ void Renderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize s
     vkFreeCommandBuffers(context_.getDevice(), commandPool_, 1, &commandBuffer);
 }
 
-
-uint32_t Renderer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const
-{
-    VkPhysicalDeviceMemoryProperties memProperties;
-    vkGetPhysicalDeviceMemoryProperties(context_.getPhysicalDevice(), &memProperties);
-
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
-    {
-        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
-        {
-            return i;
-        }
-    }
-
-    throw std::runtime_error("failed to find suitable memory type!");
-}
-
-
 void Renderer::createAllocator()
 {
     VmaVulkanFunctions vulkanFunctions{};
@@ -475,4 +549,95 @@ void Renderer::createAllocator()
     VmaAllocatorInfo info{};
     vmaGetAllocatorInfo(vmaAllocator, &info);
     assert(info.device == context_.getDevice());
+}
+
+void Renderer::updateUniformBuffer(uint32_t currentImage) const
+{
+    static auto startTime = std::chrono::high_resolution_clock::now();
+
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+    UniformBufferObject ubo{};
+    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.proj = glm::perspective(glm::radians(45.0f),
+                                swapChain_.getExtent().width / (float)swapChain_.getExtent().height,
+                                0.1f, 10.0f);
+    ubo.proj[1][1] *= -1;
+
+    memcpy(uniformBuffersMapped_[currentImage], &ubo, sizeof(ubo));
+}
+
+void Renderer::createDescriptorPool()
+{
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT);
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT);
+
+    if (vkCreateDescriptorPool(context_.getDevice(), &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create descriptor pool!");
+    }
+}
+
+void Renderer::createDescriptorSets()
+{
+    std::vector<VkDescriptorSetLayout> layouts(engine::MAX_FRAMES_IN_FLIGHT, descriptorSetLayout_);
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool_;
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT);
+    allocInfo.pSetLayouts = layouts.data();
+
+    descriptorSets_.resize(engine::MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(context_.getDevice(), &allocInfo, descriptorSets_.data()) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to allocate descriptor sets!");
+    }
+
+    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = uniformBuffers_[i];
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformBufferObject);
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = descriptorSets_[i];
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pBufferInfo = &bufferInfo;
+
+        vkUpdateDescriptorSets(context_.getDevice(), 1, &descriptorWrite, 0, nullptr);
+    }
+}
+
+void Renderer::createDescriptorSetLayout()
+{
+    VkDescriptorSetLayoutBinding uboLayoutBinding{};
+    uboLayoutBinding.binding = 0;
+    uboLayoutBinding.descriptorCount = 1;
+    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboLayoutBinding.pImmutableSamplers = nullptr;
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &uboLayoutBinding;
+
+    if (vkCreateDescriptorSetLayout(context_.getDevice(), &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create descriptor set layout!");
+    }
 }

@@ -14,11 +14,13 @@
 #include "vulkan/render_pass.hpp"
 #include "vulkan/swap_chain.hpp"
 
-App::App(int width, int height, const char *title)
-    : width_(width), height_(height), title_(title) {
+App::App(int width, int height, const char* title)
+    : width_(width), height_(height), title_(title)
+{
 }
 
-App::~App() {
+App::~App()
+{
     // Wait for GPU to be idle before destroying anything
     if (vulkanContext_) vkDeviceWaitIdle(vulkanContext_->getDevice());
 
@@ -32,7 +34,8 @@ App::~App() {
     glfwTerminate();
 }
 
-void App::initWindow() {
+void App::initWindow()
+{
     if (!glfwInit()) throw std::runtime_error("Failed to init GLFW");
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -47,34 +50,64 @@ void App::initWindow() {
     glfwSetFramebufferSizeCallback(window_, framebufferResizeCallback);
 }
 
-void App::framebufferResizeCallback(GLFWwindow *window, int width, int height) {
-    auto app = reinterpret_cast<App *>(glfwGetWindowUserPointer(window));
+void App::framebufferResizeCallback(GLFWwindow* window, int width, int height)
+{
+    auto app = reinterpret_cast<App*>(glfwGetWindowUserPointer(window));
     app->framebufferResized = true;
 }
 
-void App::initVulkan() {
+void App::initVulkan()
+{
     // Create Vulkan context after window is ready
+    // vulkanContext_ = std::make_unique<VulkanContext>(window_, true);
+    //
+    // // Step 1: Create Swapchain to get the Format and Images
+    // swapchain_ = std::make_unique<SwapChain>(*vulkanContext_, window_);
+    //
+    // // Step 2: Create RenderPass using that Format
+    // renderPass_ = std::make_unique<RenderPass>(*vulkanContext_, swapchain_->getFormat());
+    //
+    // // Step 3: INVOKE HERE
+    // // Now that both the Images (in swapchain) and the Blueprint (renderpass) exist,
+    // // we can link them together into Framebuffers.
+    // swapchain_->createFramebuffers(renderPass_->getRenderPass());
+    //
+    // // Step 4: Create Pipeline
+    // graphicsPipeline_ = std::make_unique<GraphicsPipeline>(*vulkanContext_, *swapchain_, renderPass_->getRenderPass());
+    //
+    // renderer_ = std::make_unique<Renderer>(*vulkanContext_, *swapchain_, *renderPass_, *graphicsPipeline_, window_);
+
+    // --
     vulkanContext_ = std::make_unique<VulkanContext>(window_, true);
-
-    // Step 1: Create Swapchain to get the Format and Images
     swapchain_ = std::make_unique<SwapChain>(*vulkanContext_, window_);
-
-    // Step 2: Create RenderPass using that Format
     renderPass_ = std::make_unique<RenderPass>(*vulkanContext_, swapchain_->getFormat());
-
-    // Step 3: INVOKE HERE
-    // Now that both the Images (in swapchain) and the Blueprint (renderpass) exist,
-    // we can link them together into Framebuffers.
     swapchain_->createFramebuffers(renderPass_->getRenderPass());
 
-    // Step 4: Create Pipeline
-    graphicsPipeline_ = std::make_unique<GraphicsPipeline>(*vulkanContext_, *swapchain_, renderPass_->getRenderPass());
+    // --- NEW PROFESSIONAL SEQUENCE ---
 
-    renderer_ = std::make_unique<Renderer>(*vulkanContext_, *swapchain_, *renderPass_, *graphicsPipeline_, window_);
+    // 1. Create Renderer (Minimal state)
+    renderer_ = std::make_unique<Renderer>(*vulkanContext_, *swapchain_, *renderPass_, window_);
+
+    // 2. Create the Layout (The Blueprint)
+    renderer_->createDescriptorSetLayout();
+
+    // 3. Create Pipeline (The Logic) - Pass the layout FROM the renderer
+    graphicsPipeline_ = std::make_unique<GraphicsPipeline>(
+        *vulkanContext_,
+        *swapchain_,
+        renderPass_->getRenderPass(),
+        renderer_->getDescriptorSetLayout() // <--- This is the key link
+    );
+
+    // 4. Initialize Renderer Resources (The Data)
+    // Pass the pipeline layout so the Renderer knows how to bind sets
+    renderer_->initResources(graphicsPipeline_->getPipelineLayout());
 }
 
-void App::mainLoop() {
-    while (!glfwWindowShouldClose(window_)) {
+void App::mainLoop()
+{
+    while (!glfwWindowShouldClose(window_))
+    {
         glfwPollEvents();
         processInput();
         // Keep the logic separate from the drawing
@@ -86,30 +119,37 @@ void App::mainLoop() {
     vkDeviceWaitIdle(vulkanContext_->getDevice());
 }
 
-void App::drawFrame() {
+void App::drawFrame()
+{
     // We check the flag here, or inside renderer_->drawFrame()
     // For a Senior architecture, the Renderer should report if it needs a resize
-    try {
-        renderer_->drawFrame(framebufferResized_);
-    } catch (const std::runtime_error &e) {
+    try
+    {
+        renderer_->drawFrame(graphicsPipeline_->getPipeline(), framebufferResized_);
+    }
+    catch (const std::runtime_error& e)
+    {
         // If the renderer encounters VK_ERROR_OUT_OF_DATE_KHR, it throws
         renderer_->recreateSwapChain();
     }
 
-    if (framebufferResized_) {
+    if (framebufferResized_)
+    {
         renderer_->recreateSwapChain();
         framebufferResized_ = false;
     }
 }
 
-void App::run() {
+void App::run()
+{
     initWindow();
     initVulkan();
     mainLoop();
 }
 
 
-void App::updateFrameTime() {
+void App::updateFrameTime()
+{
     // 1. Calculate delta time
     const auto currentTime = std::chrono::high_resolution_clock::now();
 
@@ -119,7 +159,8 @@ void App::updateFrameTime() {
 
     // 2. Handle printing (Aggregated to 1 second intervals)
     timer += deltaTime;
-    if (timer >= 1.0f) {
+    if (timer >= 1.0f)
+    {
         const float frameTimeMs = deltaTime * 1000.0f;
         // std::cout << "Frame Time: " << frameTimeMs << "ms" << std::endl;
 
@@ -132,8 +173,10 @@ void App::updateFrameTime() {
 }
 
 
-void App::processInput() {
-    if (glfwGetKey(window_, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+void App::processInput()
+{
+    if (glfwGetKey(window_, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    {
         glfwSetWindowShouldClose(window_, true);
     }
 }

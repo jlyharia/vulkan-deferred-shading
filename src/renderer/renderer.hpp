@@ -17,26 +17,7 @@ public:
     Renderer(VulkanContext& context,
              SwapChain& swapChain,
              RenderPass& renderPass,
-             GraphicsPipeline& pipeline,
-             GLFWwindow* window_)
-        : context_(context), swapChain_(swapChain), renderPass_(renderPass), pipeline_(pipeline), window_(window_)
-    {
-        // create vma allocator
-        createAllocator();
-        // 1. The Pool must come first
-        createCommandPool();
-
-        // 2. Buffers are allocated FROM the pool
-        createCommandBuffers();
-
-        // 3. Sync objects are independent but needed for the first frame
-        createSyncObjects();
-
-        createVertexBuffer();
-
-        createIndexBuffer();
-    }
-
+             GLFWwindow* window_);
     ~Renderer();
 
     // Disable copying: You can't "copy" a GPU renderer
@@ -44,30 +25,43 @@ public:
 
     Renderer& operator=(const Renderer&) = delete;
 
-    void drawFrame(bool framebufferResized); // The main function called by App
+    void createDescriptorSetLayout();
+    void initResources(VkPipelineLayout pipelineLayout);
+
+    void drawFrame(VkPipeline pipeline, bool framebufferResized); // The main function called by App
 
     void recreateSwapChain(); // call on resize
+    [[nodiscard]] VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_; }
+
 private:
     void createCommandPool();
 
     void createCommandBuffers();
 
     void createSyncObjects(); // Semaphores and Fences
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const;
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, VkPipeline pipeline, uint32_t imageIndex) const;
 
     void createVertexBuffer();
     void createIndexBuffer();
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                       VmaMemoryUsage vmaUsage,
-                      VkBuffer& buffer, VmaAllocation& allocation) const;
+                      VkBuffer& buffer,
+                      VmaAllocation& allocation,
+                      VmaAllocationCreateFlags vmaFlags = 0, // Added: for flags like MAPPED
+                      VmaAllocationInfo* outAllocInfo = nullptr) const;
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
     void createAllocator();
-    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
+    void createUniformBuffers();
+    void updateUniformBuffer(uint32_t currentFrame) const;
+    void createDescriptorPool();
+    void createDescriptorSets();
+
     VulkanContext& context_;
     SwapChain& swapChain_;
     RenderPass& renderPass_;
-    GraphicsPipeline& pipeline_;
+    //GraphicsPipeline& pipeline_;
+    VkPipelineLayout activePipelineLayout_ = VK_NULL_HANDLE;
     GLFWwindow* window_;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> commandBuffers_;
@@ -81,10 +75,17 @@ private:
 
     std::vector<VkFence> imagesInFlight;
     VkBuffer vertexBuffer_ = VK_NULL_HANDLE;
-   
+
     VmaAllocation vertexBufferAllocation_;
     VmaAllocator vmaAllocator;
 
     VkBuffer indexBuffer_ = VK_NULL_HANDLE;
     VmaAllocation indexBufferAllocation_;
+
+    std::vector<VkBuffer> uniformBuffers_;
+    std::vector<VmaAllocation> uniformBuffersAllocation_;
+    std::vector<void*> uniformBuffersMapped_;
+    VkDescriptorPool descriptorPool_;
+    std::vector<VkDescriptorSet> descriptorSets_;
+    VkDescriptorSetLayout descriptorSetLayout_;
 };

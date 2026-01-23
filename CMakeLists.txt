@@ -38,6 +38,7 @@ add_executable(defer_render
         src/common/config.hpp
         src/renderer/Vertex.hpp
         src/external/vma_impl.cpp
+        src/renderer/Uniform.hpp
 )
 
 # ------------------------------------------------------------
