@@ -39,6 +39,11 @@ add_executable(defer_render
         src/renderer/Vertex.hpp
         src/external/vma_impl.cpp
         src/renderer/Uniform.hpp
+        src/external/vendor_impl.cpp
+        src/system/ModelSystem.cpp
+        src/system/ModelSystem.hpp
+        src/renderer/Cemera.cpp
+        src/renderer/Cemera.hpp
 )
 
 # ------------------------------------------------------------
@@ -48,6 +53,9 @@ target_include_directories(defer_render
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/external
+#        ${CMAKE_SOURCE_DIR}/external/tinygltf
+        ${CMAKE_SOURCE_DIR}/external/tinyobj
+        ${CMAKE_SOURCE_DIR}/external/stb
         "$ENV{VULKAN_SDK}/include"
 )
 
@@ -62,13 +70,19 @@ target_link_libraries(defer_render
 )
 
 # copy assets, models, texture ...etc put this after add_executable(..)
-add_custom_command(
-        TARGET ${TARGET_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/assets
-        $<TARGET_FILE_DIR:defer_render>/assets
-        COMMENT "Copying textures folder to build directory"
-)
+#add_custom_command(
+#        TARGET ${TARGET_NAME} POST_BUILD
+#        COMMAND ${CMAKE_COMMAND} -E copy_directory
+#        ${CMAKE_SOURCE_DIR}/assets
+#        $<TARGET_FILE_DIR:defer_render>/assets
+#        COMMENT "Copying textures folder to build directory"
+#)
+# This creates a virtual link from your build folder to your actual assets
+if(UNIX)
+    execute_process(COMMAND ln -sfn "${CMAKE_SOURCE_DIR}/assets" "${CMAKE_BINARY_DIR}")
+else()
+    file(COPY "${CMAKE_SOURCE_DIR}/assets" DESTINATION "${CMAKE_BINARY_DIR}")
+endif()
 
 # Ensure build/shaders folder exists
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/shaders)

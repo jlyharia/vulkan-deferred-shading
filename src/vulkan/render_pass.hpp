@@ -11,8 +11,10 @@ class SwapChain;
 
 class RenderPass {
 public:
-    RenderPass(VulkanContext &context, VkFormat swapChainImageFormat) : context_(context),
-                                                                        swapChainImageFormat_(swapChainImageFormat) {
+    RenderPass(VulkanContext &context, VkFormat colorFormat, VkFormat depthFormat)
+        : context_(context),
+          scColorFormat(colorFormat),
+          scDepthFormat(depthFormat) {
         createRenderPass();
     }
 
@@ -22,7 +24,8 @@ public:
 
 private:
     VulkanContext &context_;
-    VkFormat swapChainImageFormat_;
+    VkFormat scColorFormat;
+    VkFormat scDepthFormat;
     VkRenderPass renderPass_;
 
     void createRenderPass();

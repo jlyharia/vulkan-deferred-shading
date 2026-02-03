@@ -3,6 +3,8 @@
 //
 
 #pragma once
+#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
+#include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #include <memory>
@@ -68,6 +70,10 @@ public:
 
     [[nodiscard]] VkQueue getGraphicsQueue() const { return graphicsQueue_; }
     [[nodiscard]] VkQueue getPresentQueue() const { return presentQueue_; }
+    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
+
+    VkFormat findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling,
+                                 VkFormatFeatureFlags features);
 
 private:
     GLFWwindow *window_;
