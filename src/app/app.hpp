@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 #include <memory>
 
+#include "renderer/Cemera.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 class Renderer;
@@ -68,6 +69,7 @@ private:
     int width_;
     int height_;
     const char *title_;
+    Camera camera;
 
     // 1. GLFW Window (Destroyed LAST)
     GLFWwindow *window_ = nullptr;
@@ -108,6 +110,8 @@ private:
     float deltaTime = 0.0f;
 
     bool framebufferResized_ = false;
+
+    std::chrono::time_point<std::chrono::high_resolution_clock> lastFrameTime;
 
     void processInput();
 };

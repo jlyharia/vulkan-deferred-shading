@@ -2,46 +2,35 @@
 // Created by johnny on 12/29/25.
 //
 
-#define GLM_FORCE_RADIANS
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "renderer.hpp"
 
 #include <chrono>
 #include <cstring>
+#include <iostream>
 
 #include "Uniform.hpp"
 #include "Vertex.hpp"
 #include "common/config.hpp"
-#include "vulkan/graphics_pipeline.hpp"
 #include "vulkan/render_pass.hpp"
 #include "vulkan/swap_chain.hpp"
 #include "vulkan/VulkanContext.hpp"
+// The C++ Bindings Header
+#include <vulkan/vulkan.hpp>
 
-Renderer::Renderer(VulkanContext& context, SwapChain& swapChain, RenderPass& renderPass,
-                   GLFWwindow* window_)
+Renderer::Renderer(VulkanContext &context, SwapChain &swapChain, RenderPass &renderPass,
+                   GLFWwindow *window_)
     : context_(context), swapChain_(swapChain), renderPass_(renderPass),
-       window_(window_)
-{
+      window_(window_) {
     // 1. Core Memory & Commands
-    createAllocator();      // VMA should be first
+    createAllocator(); // VMA should be first
     createCommandPool();
     createCommandBuffers();
     createSyncObjects();
-
-    // // 2. Resource Layout (The Blueprint)
-    // // Note: Since you moved this to Renderer, call it here!
-    // createDescriptorSetLayout();
-    //
-    // // 3. Physical Data
-    // createVertexBuffer();
-    // createIndexBuffer();
-    // createUniformBuffers();
-    //
-    // // 4. Descriptor Management (The Connection)
-    // createDescriptorPool(); // MUST exist before Sets
-    // createDescriptorSets(); // MUST exist before recording commands
 }
+
 /**
 * In Vulkan, the specific order of destruction between a Semaphore and a Command Pool does not technically matter, as long as they are both destroyed after the GPU has finished using them.
 *
@@ -61,20 +50,17 @@ Always follow the "Last In, First Out" (LIFO) rule relative to the Logical Devic
 
    5. Destroy Device (The Logical Device handle).
  */
-Renderer::~Renderer()
-{
+Renderer::~Renderer() {
     // 1. Ensure GPU is idle before we start deleting things
     vkDeviceWaitIdle(context_.getDevice());
 
     vkDestroyDescriptorPool(context_.getDevice(), descriptorPool_, nullptr);
 
     vkDestroyDescriptorSetLayout(context_.getDevice(), descriptorSetLayout_, nullptr);
-    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++)
-    {
+    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++) {
         // VMA automatically handles the Unmapping if you used
         // VMA_ALLOCATION_CREATE_MAPPED_BIT.
-        if (uniformBuffers_[i] != VK_NULL_HANDLE)
-        {
+        if (uniformBuffers_[i] != VK_NULL_HANDLE) {
             vmaDestroyBuffer(vmaAllocator, uniformBuffers_[i], uniformBuffersAllocation_[i]);
 
             // Safety: Clear the handles
@@ -85,8 +71,7 @@ Renderer::~Renderer()
     }
 
     // This replaces BOTH vkDestroyBuffer and vkFreeMemory
-    if (vertexBuffer_ != VK_NULL_HANDLE)
-    {
+    if (vertexBuffer_ != VK_NULL_HANDLE) {
         // This frees BOTH the buffer and the memory allocation
         vmaDestroyBuffer(vmaAllocator, vertexBuffer_, vertexBufferAllocation_);
         // Safety: set to null so you don't accidentally try to use it again
@@ -94,8 +79,7 @@ Renderer::~Renderer()
         vertexBufferAllocation_ = nullptr;
     }
 
-    if (indexBuffer_ != VK_NULL_HANDLE)
-    {
+    if (indexBuffer_ != VK_NULL_HANDLE) {
         // This frees BOTH the buffer and the memory allocation
         vmaDestroyBuffer(vmaAllocator, indexBuffer_, indexBufferAllocation_);
         // Safety: set to null so you don't accidentally try to use it again
@@ -104,49 +88,45 @@ Renderer::~Renderer()
     }
     // 3. Destroy the allocator itself
     // Note: All VMA buffers MUST be destroyed before this call
-    if (vmaAllocator != VK_NULL_HANDLE)
-    {
+    if (vmaAllocator != VK_NULL_HANDLE) {
         vmaDestroyAllocator(vmaAllocator);
     }
 
     // 2. Destroy Fences (Per Frame Slot)
-    for (const auto& fence : inFlightFences_)
-    {
+    for (const auto &fence : inFlightFences_) {
         vkDestroyFence(context_.getDevice(), fence, nullptr);
     }
 
     // 3. Destroy Semaphores (Per Swapchain Image)
-    for (const auto& semaphore : imageAvailableSemaphores_)
-    {
+    for (const auto &semaphore : imageAvailableSemaphores_) {
         vkDestroySemaphore(context_.getDevice(), semaphore, nullptr);
     }
 
-    for (const auto& semaphore : renderFinishedSemaphores_)
-    {
+    for (const auto &semaphore : renderFinishedSemaphores_) {
         vkDestroySemaphore(context_.getDevice(), semaphore, nullptr);
     }
 
     // 4. Destroy Command Pool (Implicitly frees all Command Buffers)
-    if (commandPool_ != VK_NULL_HANDLE)
-    {
+    if (commandPool_ != VK_NULL_HANDLE) {
         vkDestroyCommandPool(context_.getDevice(), commandPool_, nullptr);
     }
 }
 
-void Renderer::initResources(VkPipelineLayout pipelineLayout)
-{
+void Renderer::initResources(VkPipelineLayout pipelineLayout, std::string modelPath) {
     activePipelineLayout_ = pipelineLayout; // Store for vkCmdBindDescriptorSets
-
+    ms.loadObjModel(modelPath);
+    std::cout << "Vertices loaded: " << vertices.size() << std::endl;
+    if (vertices.empty()) {
+        throw std::runtime_error("No vertices loaded! Check your file path.");
+    }
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
-
 }
 
-void Renderer::createCommandPool()
-{
+void Renderer::createCommandPool() {
     QueueFamilyIndices queueFamilyIndices = context_.findQueueFamilies(
         context_.getPhysicalDevice());
 
@@ -155,14 +135,12 @@ void Renderer::createCommandPool()
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
 
-    if (vkCreateCommandPool(context_.getDevice(), &poolInfo, nullptr, &commandPool_) != VK_SUCCESS)
-    {
+    if (vkCreateCommandPool(context_.getDevice(), &poolInfo, nullptr, &commandPool_) != VK_SUCCESS) {
         throw std::runtime_error("failed to create command pool!");
     }
 }
 
-void Renderer::createCommandBuffers()
-{
+void Renderer::createCommandBuffers() {
     commandBuffers_.resize(engine::MAX_FRAMES_IN_FLIGHT);
 
     VkCommandBufferAllocateInfo allocInfo{};
@@ -171,19 +149,16 @@ void Renderer::createCommandBuffers()
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT);
 
-    if (vkAllocateCommandBuffers(context_.getDevice(), &allocInfo, commandBuffers_.data()) != VK_SUCCESS)
-    {
+    if (vkAllocateCommandBuffers(context_.getDevice(), &allocInfo, commandBuffers_.data()) != VK_SUCCESS) {
         throw std::runtime_error("failed to allocate command buffers!");
     }
 }
 
-void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, VkPipeline pipeline, uint32_t imageIndex) const
-{
+void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, VkPipeline pipeline, uint32_t imageIndex) const {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
-    {
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
         throw std::runtime_error("failed to begin recording command buffer!");
     }
 
@@ -194,9 +169,14 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, VkPipeline pip
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = swapChain_.getExtent();
 
-    VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
-    renderPassInfo.clearValueCount = 1;
-    renderPassInfo.pClearValues = &clearColor;
+    std::array<VkClearValue, 2> clearValues{};
+    // Index 0: Color (Black with 1.0 Alpha)
+    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    // Index 1: Depth (1.0 is the far plane, 0 is the stencil)
+    clearValues[1].depthStencil = {1.0f, 0};
+
+    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    renderPassInfo.pClearValues = clearValues.data();
     // begin render pass
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     {
@@ -219,20 +199,19 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, VkPipeline pip
         VkBuffer vertexBuffers[] = {vertexBuffer_};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffer, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipelineLayout_, 0, 1, &descriptorSets_[currentFrame], 0, nullptr);
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipelineLayout_, 0, 1,
+                                &descriptorSets_[currentFrame], 0, nullptr);
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
     }
     vkCmdEndRenderPass(commandBuffer);
 
-    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
-    {
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("failed to record command buffer!");
     }
 }
 
-void Renderer::createSyncObjects()
-{
+void Renderer::createSyncObjects() {
     const auto imageCount = static_cast<uint32_t>(swapChain_.getImages().size());
 
     // 1. Resize all containers
@@ -249,29 +228,24 @@ void Renderer::createSyncObjects()
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     // 2. Create Fences (Per Frame Slot)
-    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++)
-    {
-        if (vkCreateFence(context_.getDevice(), &fenceInfo, nullptr, &inFlightFences_[i]) != VK_SUCCESS)
-        {
+    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++) {
+        if (vkCreateFence(context_.getDevice(), &fenceInfo, nullptr, &inFlightFences_[i]) != VK_SUCCESS) {
             throw std::runtime_error("failed to create fences!");
         }
     }
 
     // 3. Create Semaphores (Per Swapchain Image)
-    for (size_t i = 0; i < imageCount; i++)
-    {
+    for (size_t i = 0; i < imageCount; i++) {
         if (vkCreateSemaphore(context_.getDevice(), &semaphoreInfo, nullptr, &imageAvailableSemaphores_[i]) !=
             VK_SUCCESS
             || vkCreateSemaphore(context_.getDevice(), &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]) !=
-            VK_SUCCESS)
-        {
+            VK_SUCCESS) {
             throw std::runtime_error("failed to create semaphores!");
         }
     }
 }
 
-void Renderer::drawFrame(VkPipeline pipeline, bool framebufferResized)
-{
+void Renderer::drawFrame(VkPipeline pipeline, bool framebufferResized, const Camera &camera) {
     vkWaitForFences(context_.getDevice(), 1, &inFlightFences_[currentFrame], VK_TRUE, UINT64_MAX);
     // vkResetFences(context_.getDevice(), 1, &inFlightFences_[currentFrame]);
 
@@ -280,20 +254,17 @@ void Renderer::drawFrame(VkPipeline pipeline, bool framebufferResized)
                                                             imageAvailableSemaphores_[currentFrame],
                                                             VK_NULL_HANDLE, &imageIndex);
 
-    if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR)
-    {
+    if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR) {
         recreateSwapChain();
         return;
     }
-    if (acquireNextImageResult != VK_SUCCESS && acquireNextImageResult != VK_SUBOPTIMAL_KHR)
-    {
+    if (acquireNextImageResult != VK_SUCCESS && acquireNextImageResult != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("failed to acquire swap chain image!");
     }
 
-    updateUniformBuffer(currentFrame);
+    updateUniformBuffer(currentFrame, camera);
     // 2. NEW: If this specific image is already in use by another frame, wait for it!
-    if (imagesInFlight[imageIndex] != VK_NULL_HANDLE)
-    {
+    if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
         vkWaitForFences(context_.getDevice(), 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
     }
     // Mark this image as now being used by the current frame's fence
@@ -322,8 +293,7 @@ void Renderer::drawFrame(VkPipeline pipeline, bool framebufferResized)
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    if (vkQueueSubmit(context_.getGraphicsQueue(), 1, &submitInfo, inFlightFences_[currentFrame]) != VK_SUCCESS)
-    {
+    if (vkQueueSubmit(context_.getGraphicsQueue(), 1, &submitInfo, inFlightFences_[currentFrame]) != VK_SUCCESS) {
         throw std::runtime_error("failed to submit draw command buffer!");
     }
 
@@ -339,28 +309,23 @@ void Renderer::drawFrame(VkPipeline pipeline, bool framebufferResized)
 
     presentInfo.pImageIndices = &imageIndex;
 
-
     VkResult queuePresentResult = vkQueuePresentKHR(context_.getPresentQueue(), &presentInfo);
 
-    if (queuePresentResult == VK_ERROR_OUT_OF_DATE_KHR || queuePresentResult == VK_SUBOPTIMAL_KHR || framebufferResized)
-    {
+    if (queuePresentResult == VK_ERROR_OUT_OF_DATE_KHR || queuePresentResult == VK_SUBOPTIMAL_KHR ||
+        framebufferResized) {
         // framebufferResized = false;
         recreateSwapChain();
-    }
-    else if (queuePresentResult != VK_SUCCESS)
-    {
+    } else if (queuePresentResult != VK_SUCCESS) {
         throw std::runtime_error("failed to present swap chain image!");
     }
     currentFrame = (currentFrame + 1) % engine::MAX_FRAMES_IN_FLIGHT;
 }
 
-void Renderer::recreateSwapChain()
-{
+void Renderer::recreateSwapChain() {
     // 1. Handle Minimization (Pause the engine if width/height is 0)
     int width = 0, height = 0;
     glfwGetFramebufferSize(window_, &width, &height);
-    while (width == 0 || height == 0)
-    {
+    while (width == 0 || height == 0) {
         glfwGetFramebufferSize(window_, &width, &height);
         glfwWaitEvents();
     }
@@ -383,8 +348,7 @@ void Renderer::recreateSwapChain()
 }
 
 
-void Renderer::createVertexBuffer()
-{
+void Renderer::createVertexBuffer() {
     VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
     // --- STEP 1: Create Staging Buffer (CPU Visible) ---
@@ -394,7 +358,7 @@ void Renderer::createVertexBuffer()
                  VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAllocation);
 
     // --- STEP 2: Map and Copy Data ---
-    void* data;
+    void *data;
     vmaMapMemory(vmaAllocator, stagingAllocation, &data);
     memcpy(data, vertices.data(), (size_t)bufferSize);
     vmaUnmapMemory(vmaAllocator, stagingAllocation);
@@ -410,8 +374,7 @@ void Renderer::createVertexBuffer()
     vmaDestroyBuffer(vmaAllocator, stagingBuffer, stagingAllocation);
 }
 
-void Renderer::createIndexBuffer()
-{
+void Renderer::createIndexBuffer() {
     VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
 
     VkBuffer stagingBuffer;
@@ -419,11 +382,10 @@ void Renderer::createIndexBuffer()
     createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                  VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAllocation);
 
-    void* data;
+    void *data;
     vmaMapMemory(vmaAllocator, stagingAllocation, &data);
     memcpy(data, indices.data(), (size_t)bufferSize);
     vmaUnmapMemory(vmaAllocator, stagingAllocation);
-
 
     // --- STEP 3: Create Index Buffer (GPU Local) ---
     createBuffer(bufferSize,
@@ -438,16 +400,14 @@ void Renderer::createIndexBuffer()
     vmaDestroyBuffer(vmaAllocator, stagingBuffer, stagingAllocation);
 }
 
-void Renderer::createUniformBuffers()
-{
+void Renderer::createUniformBuffers() {
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
     uniformBuffers_.resize(engine::MAX_FRAMES_IN_FLIGHT);
     uniformBuffersAllocation_.resize(engine::MAX_FRAMES_IN_FLIGHT);
     uniformBuffersMapped_.resize(engine::MAX_FRAMES_IN_FLIGHT);
 
-    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++)
-    {
+    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++) {
         VmaAllocationInfo allocInfo; // This will hold our pointer
 
         createBuffer(
@@ -458,7 +418,7 @@ void Renderer::createUniformBuffers()
             uniformBuffersAllocation_[i],
             VMA_ALLOCATION_CREATE_MAPPED_BIT, // Magic: Tells VMA to map it now
             &allocInfo
-        );
+            );
 
         // Store the pointer for easy memcpy later
         uniformBuffersMapped_[i] = allocInfo.pMappedData;
@@ -468,11 +428,10 @@ void Renderer::createUniformBuffers()
 void Renderer::createBuffer(VkDeviceSize size,
                             VkBufferUsageFlags usage,
                             VmaMemoryUsage vmaUsage,
-                            VkBuffer& buffer,
-                            VmaAllocation& allocation,
+                            VkBuffer &buffer,
+                            VmaAllocation &allocation,
                             VmaAllocationCreateFlags vmaFlags, // Added: for flags like MAPPED
-                            VmaAllocationInfo* outAllocInfo) const
-{
+                            VmaAllocationInfo *outAllocInfo) const {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -487,15 +446,13 @@ void Renderer::createBuffer(VkDeviceSize size,
     assert(context_.getDevice() != VK_NULL_HANDLE && "Device handle is null!");
     // This one call replaces vkCreateBuffer, vkGetBufferMemoryRequirements,
     // , vkAllocateMemory, and vkBindBufferMemory.
-    if (vmaCreateBuffer(vmaAllocator, &bufferInfo, &allocInfo, &buffer, &allocation, outAllocInfo) != VK_SUCCESS)
-    {
+    if (vmaCreateBuffer(vmaAllocator, &bufferInfo, &allocInfo, &buffer, &allocation, outAllocInfo) != VK_SUCCESS) {
         throw std::runtime_error("failed to create buffer with VMA!");
     }
 }
 
 
-void Renderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
-{
+void Renderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -528,8 +485,7 @@ void Renderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize s
     vkFreeCommandBuffers(context_.getDevice(), commandPool_, 1, &commandBuffer);
 }
 
-void Renderer::createAllocator()
-{
+void Renderer::createAllocator() {
     VmaVulkanFunctions vulkanFunctions{};
     vulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
     vulkanFunctions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
@@ -542,8 +498,7 @@ void Renderer::createAllocator()
     allocatorInfo.pVulkanFunctions = &vulkanFunctions;
 
     VkResult res = vmaCreateAllocator(&allocatorInfo, &vmaAllocator);
-    if (res != VK_SUCCESS)
-    {
+    if (res != VK_SUCCESS) {
         throw std::runtime_error("failed to create VMA allocator!");
     }
     VmaAllocatorInfo info{};
@@ -551,26 +506,16 @@ void Renderer::createAllocator()
     assert(info.device == context_.getDevice());
 }
 
-void Renderer::updateUniformBuffer(uint32_t currentImage) const
-{
-    static auto startTime = std::chrono::high_resolution_clock::now();
-
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
+void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera) const {
     UniformBufferObject ubo{};
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.proj = glm::perspective(glm::radians(45.0f),
-                                swapChain_.getExtent().width / (float)swapChain_.getExtent().height,
-                                0.1f, 10.0f);
-    ubo.proj[1][1] *= -1;
+    ubo.model = glm::mat4(1.0f);
+    ubo.view = camera.getViewMatrix();
+    ubo.proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
 
     memcpy(uniformBuffersMapped_[currentImage], &ubo, sizeof(ubo));
 }
 
-void Renderer::createDescriptorPool()
-{
+void Renderer::createDescriptorPool() {
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSize.descriptorCount = static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT);
@@ -581,14 +526,12 @@ void Renderer::createDescriptorPool()
     poolInfo.pPoolSizes = &poolSize;
     poolInfo.maxSets = static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT);
 
-    if (vkCreateDescriptorPool(context_.getDevice(), &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS)
-    {
+    if (vkCreateDescriptorPool(context_.getDevice(), &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS) {
         throw std::runtime_error("failed to create descriptor pool!");
     }
 }
 
-void Renderer::createDescriptorSets()
-{
+void Renderer::createDescriptorSets() {
     std::vector<VkDescriptorSetLayout> layouts(engine::MAX_FRAMES_IN_FLIGHT, descriptorSetLayout_);
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -597,13 +540,11 @@ void Renderer::createDescriptorSets()
     allocInfo.pSetLayouts = layouts.data();
 
     descriptorSets_.resize(engine::MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(context_.getDevice(), &allocInfo, descriptorSets_.data()) != VK_SUCCESS)
-    {
+    if (vkAllocateDescriptorSets(context_.getDevice(), &allocInfo, descriptorSets_.data()) != VK_SUCCESS) {
         throw std::runtime_error("failed to allocate descriptor sets!");
     }
 
-    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++)
-    {
+    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffers_[i];
         bufferInfo.offset = 0;
@@ -622,8 +563,7 @@ void Renderer::createDescriptorSets()
     }
 }
 
-void Renderer::createDescriptorSetLayout()
-{
+void Renderer::createDescriptorSetLayout() {
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorCount = 1;
@@ -636,8 +576,7 @@ void Renderer::createDescriptorSetLayout()
     layoutInfo.bindingCount = 1;
     layoutInfo.pBindings = &uboLayoutBinding;
 
-    if (vkCreateDescriptorSetLayout(context_.getDevice(), &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS)
-    {
+    if (vkCreateDescriptorSetLayout(context_.getDevice(), &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS) {
         throw std::runtime_error("failed to create descriptor set layout!");
     }
 }

@@ -14,8 +14,6 @@ class SwapChain {
 public:
     SwapChain(VulkanContext &context, GLFWwindow *window)
         : context_(context), window_(window) {
-        // createSwapChain();
-        // createImageViews();
         init();
     }
 
@@ -47,7 +45,12 @@ public:
     static bool isDeviceAdequate(VkPhysicalDevice device, VkSurfaceKHR surface);
 
     // Getters
-    VkFormat getFormat() const { return swapChainImageFormat_; }
+    VkFormat getColorFormat() const { return swapChainImageFormat_; }
+
+    VkFormat getDepthFormat() {
+        return swapChainDepthFormat_ == VK_FORMAT_UNDEFINED ? findDepthFormat() : swapChainDepthFormat_;
+    }
+
     VkExtent2D getExtent() const { return swapChainExtent_; }
     VkSwapchainKHR getHandle() const { return swapChain_; }
     const std::vector<VkImageView> &getImageViews() const { return swapChainImageViews_; }
@@ -67,19 +70,33 @@ private:
     GLFWwindow *window_;
     std::vector<VkImageView> swapChainImageViews_;
     std::vector<VkFramebuffer> swapChainFramebuffers_;
+    VkImage depthImage;
+    VkDeviceMemory depthImageMemory;
+    VkImageView depthImageView;
+    VkFormat swapChainDepthFormat_ = VK_FORMAT_UNDEFINED;
 
 
     void init() {
         createSwapChain();
         createImageViews();
+        // Create depth resources AFTER you know the new swapchain extent (width/height)
+        // but BEFORE you create framebuffers.
+        createDepthResources();
     }
 
     void createImageViews();
 
     void createSwapChain();
-
+    void createDepthResources();
 
     static SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface);
 
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities);
+
+    VkFormat findDepthFormat();
+
+    void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
+                     VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &imageMemory) const;
+    VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) const;
+
 };

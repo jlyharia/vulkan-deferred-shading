@@ -2,10 +2,14 @@
 // Created by johnny on 12/29/25.
 //
 #pragma once
+#include <string>
 #include <vector>
 #include <GLFW/glfw3.h>
 #include <vma/vk_mem_alloc.h>
 #include <vulkan/vulkan_core.h>
+
+#include "Cemera.hpp"
+#include "system/ModelSystem.hpp"
 class GraphicsPipeline;
 class RenderPass;
 class SwapChain;
@@ -26,9 +30,9 @@ public:
     Renderer& operator=(const Renderer&) = delete;
 
     void createDescriptorSetLayout();
-    void initResources(VkPipelineLayout pipelineLayout);
+    void initResources(VkPipelineLayout pipelineLayout, std::string modelPath);
 
-    void drawFrame(VkPipeline pipeline, bool framebufferResized); // The main function called by App
+    void drawFrame(VkPipeline pipeline, bool framebufferResized, const Camera& camera); // The main function called by App
 
     void recreateSwapChain(); // call on resize
     [[nodiscard]] VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_; }
@@ -53,7 +57,7 @@ private:
 
     void createAllocator();
     void createUniformBuffers();
-    void updateUniformBuffer(uint32_t currentFrame) const;
+    void updateUniformBuffer(uint32_t currentFrame,const Camera& camera) const;
     void createDescriptorPool();
     void createDescriptorSets();
 
@@ -88,4 +92,5 @@ private:
     VkDescriptorPool descriptorPool_;
     std::vector<VkDescriptorSet> descriptorSets_;
     VkDescriptorSetLayout descriptorSetLayout_;
+    ModelSystem ms;
 };
