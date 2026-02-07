@@ -53,7 +53,7 @@ target_include_directories(defer_render
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/external
-#        ${CMAKE_SOURCE_DIR}/external/tinygltf
+        #        ${CMAKE_SOURCE_DIR}/external/tinygltf
         ${CMAKE_SOURCE_DIR}/external/tinyobj
         ${CMAKE_SOURCE_DIR}/external/stb
         "$ENV{VULKAN_SDK}/include"
@@ -70,19 +70,12 @@ target_link_libraries(defer_render
 )
 
 # copy assets, models, texture ...etc put this after add_executable(..)
-#add_custom_command(
-#        TARGET ${TARGET_NAME} POST_BUILD
-#        COMMAND ${CMAKE_COMMAND} -E copy_directory
-#        ${CMAKE_SOURCE_DIR}/assets
-#        $<TARGET_FILE_DIR:defer_render>/assets
-#        COMMENT "Copying textures folder to build directory"
-#)
 # This creates a virtual link from your build folder to your actual assets
-if(UNIX)
+if (UNIX)
     execute_process(COMMAND ln -sfn "${CMAKE_SOURCE_DIR}/assets" "${CMAKE_BINARY_DIR}")
-else()
+else ()
     file(COPY "${CMAKE_SOURCE_DIR}/assets" DESTINATION "${CMAKE_BINARY_DIR}")
-endif()
+endif ()
 
 # Ensure build/shaders folder exists
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/shaders)
@@ -96,28 +89,62 @@ if (NOT GLSLANG_VALIDATOR)
 endif ()
 
 # GLSL → SPV
-add_custom_command(
-        OUTPUT ${CMAKE_BINARY_DIR}/shaders/vert.spv
-        COMMAND ${GLSLANG_VALIDATOR} -V ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.vert -o ${CMAKE_BINARY_DIR}/shaders/vert.spv
-        DEPENDS ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.vert
-)
-
-add_custom_command(
-        OUTPUT ${CMAKE_BINARY_DIR}/shaders/frag.spv
-        COMMAND ${GLSLANG_VALIDATOR} -V ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.frag -o ${CMAKE_BINARY_DIR}/shaders/frag.spv
-        DEPENDS ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.frag
-)
-
 #add_custom_command(
-#        OUTPUT ${CMAKE_BINARY_DIR}/shaders/comp.spv
-#        COMMAND ${GLSLANG_VALIDATOR} -V ${CMAKE_SOURCE_DIR}/shaders/31_shader_base.comp -o ${CMAKE_BINARY_DIR}/shaders/comp.spv
-#        DEPENDS ${CMAKE_SOURCE_DIR}/shaders/31_shader_base.comp
+#        OUTPUT ${CMAKE_BINARY_DIR}/shaders/vert.spv
+#        COMMAND ${GLSLANG_VALIDATOR} -V ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.vert -o ${CMAKE_BINARY_DIR}/shaders/vert.spv
+#        DEPENDS ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.vert
 #)
+#
+#add_custom_command(
+#        OUTPUT ${CMAKE_BINARY_DIR}/shaders/frag.spv
+#        COMMAND ${GLSLANG_VALIDATOR} -V ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.frag -o ${CMAKE_BINARY_DIR}/shaders/frag.spv
+#        DEPENDS ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.frag
+#)
+#
+#add_custom_target(Shaders ALL DEPENDS
+#        ${CMAKE_BINARY_DIR}/shaders/vert.spv
+#        ${CMAKE_BINARY_DIR}/shaders/frag.spv
+#        #        ${CMAKE_BINARY_DIR}/shaders/comp.spv
+#)
+#
+#add_dependencies(defer_render Shaders)
+# ------------------------------------------------------------
+# Automatic Shader Compilation (GLSL → SPV)
+# ------------------------------------------------------------
 
-add_custom_target(Shaders ALL DEPENDS
-        ${CMAKE_BINARY_DIR}/shaders/vert.spv
-        ${CMAKE_BINARY_DIR}/shaders/frag.spv
-        #        ${CMAKE_BINARY_DIR}/shaders/comp.spv
+set(SHADER_SOURCE_DIR "${CMAKE_SOURCE_DIR}/shaders")
+set(SHADER_BINARY_DIR "${CMAKE_BINARY_DIR}/shaders")
+
+# Collect all vertex and fragment shaders
+file(GLOB_RECURSE SHADER_SOURCES
+        "${SHADER_SOURCE_DIR}/*.vert"
+        "${SHADER_SOURCE_DIR}/*.frag"
+        "${SHADER_SOURCE_DIR}/*.glsl" # Added .glsl for your blinn-phong files
 )
 
-add_dependencies(defer_render Shaders)
+set(SPIRV_BINARY_FILES "")
+
+foreach(SHADER_PATH ${SHADER_SOURCES})
+    # Get the relative path so we can mirror the folder structure in build/
+    file(RELATIVE_PATH REL_PATH "${SHADER_SOURCE_DIR}" "${SHADER_PATH}")
+    set(OUTPUT_SPV "${SHADER_BINARY_DIR}/${REL_PATH}.spv")
+
+    # Ensure the subfolder exists in the build directory
+    get_filename_component(OUT_DIR ${OUTPUT_SPV} DIRECTORY)
+    file(MAKE_DIRECTORY ${OUT_DIR})
+
+    add_custom_command(
+            OUTPUT ${OUTPUT_SPV}
+            COMMAND ${GLSLANG_VALIDATOR} -V ${SHADER_PATH} -o ${OUTPUT_SPV}
+            DEPENDS ${SHADER_PATH}
+            COMMENT "Compiling ${REL_PATH} to SPIR-V"
+    )
+
+    list(APPEND SPIRV_BINARY_FILES ${OUTPUT_SPV})
+endforeach()
+
+# Create the target that triggers the compilation
+add_custom_target(Shaders ALL DEPENDS ${SPIRV_BINARY_FILES})
+
+# Ensure the executable waits for shaders to be compiled
+add_dependencies(${TARGET_NAME} Shaders)

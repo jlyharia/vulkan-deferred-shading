@@ -202,6 +202,18 @@ void Renderer::recordCommandBuffer(VkCommandBuffer commandBuffer, VkPipeline pip
         vkCmdBindIndexBuffer(commandBuffer, indexBuffer_, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipelineLayout_, 0, 1,
                                 &descriptorSets_[currentFrame], 0, nullptr);
+
+        // Inside your command buffer recording loop
+        int shadingMode = 1; //usePhong ? 1 : 0; // Your toggle logic
+
+        vkCmdPushConstants(
+            commandBuffer,
+            activePipelineLayout_, // Must match the layout used to create the pipeline
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            0, // Offset
+            sizeof(int), // Size
+            &shadingMode // Pointer to the data
+            );
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
     }
     vkCmdEndRenderPass(commandBuffer);
@@ -569,7 +581,7 @@ void Renderer::createDescriptorSetLayout() {
     uboLayoutBinding.descriptorCount = 1;
     uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboLayoutBinding.pImmutableSamplers = nullptr;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
