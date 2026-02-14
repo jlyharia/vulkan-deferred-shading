@@ -16,6 +16,8 @@ find_package(Vulkan REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 
+add_definitions(-DVULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1)
+
 # ------------------------------------------------------------
 # Target
 # ------------------------------------------------------------
@@ -42,21 +44,29 @@ add_executable(defer_render
         src/external/vendor_impl.cpp
         src/system/ModelSystem.cpp
         src/system/ModelSystem.hpp
-        src/renderer/Cemera.cpp
-        src/renderer/Cemera.hpp
+        src/renderer/Camera.cpp
+        src/renderer/Camera.hpp
 )
 
 # ------------------------------------------------------------
 # Includes
 # ------------------------------------------------------------
+
+# Use target_compile_definitions instead of add_definitions for better scope control
+
+target_compile_definitions(defer_render PRIVATE
+        VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+        VULKAN_HPP_STORAGE_SHARED=1
+        VULKAN_HPP_STORAGE_SHARED_EXPORT=1
+)
+# Fix the include priority: Put Vulkan SDK FIRST
 target_include_directories(defer_render
         PRIVATE
+        "$ENV{VULKAN_SDK}/include"  # <--- Ensure this is at the top
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/external
-        #        ${CMAKE_SOURCE_DIR}/external/tinygltf
         ${CMAKE_SOURCE_DIR}/external/tinyobj
         ${CMAKE_SOURCE_DIR}/external/stb
-        "$ENV{VULKAN_SDK}/include"
 )
 
 # ------------------------------------------------------------
@@ -89,23 +99,6 @@ if (NOT GLSLANG_VALIDATOR)
 endif ()
 
 # GLSL → SPV
-#add_custom_command(
-#        OUTPUT ${CMAKE_BINARY_DIR}/shaders/vert.spv
-#        COMMAND ${GLSLANG_VALIDATOR} -V ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.vert -o ${CMAKE_BINARY_DIR}/shaders/vert.spv
-#        DEPENDS ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.vert
-#)
-#
-#add_custom_command(
-#        OUTPUT ${CMAKE_BINARY_DIR}/shaders/frag.spv
-#        COMMAND ${GLSLANG_VALIDATOR} -V ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.frag -o ${CMAKE_BINARY_DIR}/shaders/frag.spv
-#        DEPENDS ${CMAKE_SOURCE_DIR}/shaders/09_shader_base.frag
-#)
-#
-#add_custom_target(Shaders ALL DEPENDS
-#        ${CMAKE_BINARY_DIR}/shaders/vert.spv
-#        ${CMAKE_BINARY_DIR}/shaders/frag.spv
-#        #        ${CMAKE_BINARY_DIR}/shaders/comp.spv
-#)
 #
 #add_dependencies(defer_render Shaders)
 # ------------------------------------------------------------
@@ -124,7 +117,7 @@ file(GLOB_RECURSE SHADER_SOURCES
 
 set(SPIRV_BINARY_FILES "")
 
-foreach(SHADER_PATH ${SHADER_SOURCES})
+foreach (SHADER_PATH ${SHADER_SOURCES})
     # Get the relative path so we can mirror the folder structure in build/
     file(RELATIVE_PATH REL_PATH "${SHADER_SOURCE_DIR}" "${SHADER_PATH}")
     set(OUTPUT_SPV "${SHADER_BINARY_DIR}/${REL_PATH}.spv")
@@ -141,7 +134,7 @@ foreach(SHADER_PATH ${SHADER_SOURCES})
     )
 
     list(APPEND SPIRV_BINARY_FILES ${OUTPUT_SPV})
-endforeach()
+endforeach ()
 
 # Create the target that triggers the compilation
 add_custom_target(Shaders ALL DEPENDS ${SPIRV_BINARY_FILES})

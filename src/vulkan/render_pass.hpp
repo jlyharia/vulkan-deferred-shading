@@ -3,7 +3,7 @@
 //
 
 #pragma once
-#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan.hpp>
 
 
 class VulkanContext;
@@ -11,7 +11,7 @@ class SwapChain;
 
 class RenderPass {
 public:
-    RenderPass(VulkanContext &context, VkFormat colorFormat, VkFormat depthFormat)
+    RenderPass(VulkanContext &context, vk::Format colorFormat, vk::Format depthFormat)
         : context_(context),
           scColorFormat(colorFormat),
           scDepthFormat(depthFormat) {
@@ -20,13 +20,13 @@ public:
 
     ~RenderPass();
 
-    [[nodiscard]] VkRenderPass getRenderPass() const { return renderPass_; }
+    [[nodiscard]] vk::RenderPass getRenderPass() const { return renderPass_; }
 
 private:
     VulkanContext &context_;
-    VkFormat scColorFormat;
-    VkFormat scDepthFormat;
-    VkRenderPass renderPass_;
+    vk::Format scColorFormat;
+    vk::Format scDepthFormat;
+    vk::RenderPass renderPass_;
 
     void createRenderPass();
 };

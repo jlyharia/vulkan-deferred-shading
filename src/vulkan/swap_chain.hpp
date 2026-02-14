@@ -1,12 +1,10 @@
 //
 // Created by johnny on 12/25/25.
 //
-
 #pragma once
 #include <vector>
+#include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
-#include <vulkan/vulkan_core.h>
-
 
 class VulkanContext;
 
@@ -17,86 +15,73 @@ public:
         init();
     }
 
-    void recreate(VkRenderPass renderPass) {
-        cleanup(); // Clean up old handles
-        init(); // Create new handles with new window size
-        createFramebuffers(renderPass); // Re-link to the renderpass
-    }
-
     ~SwapChain();
 
-    // Disable copying - Swapchains manage heavy GPU resources
-    SwapChain(const SwapChain &) = delete;
-
-    SwapChain &operator=(const SwapChain &) = delete;
-
-    // The logic to "reset" the swapchain
-
-
-    void cleanup(); // Logic moved out of destructor
-
-
-    struct SwapChainSupportDetails {
-        VkSurfaceCapabilitiesKHR capabilities;
-        std::vector<VkSurfaceFormatKHR> formats;
-        std::vector<VkPresentModeKHR> presentModes;
-    };
-
-    static bool isDeviceAdequate(VkPhysicalDevice device, VkSurfaceKHR surface);
-
-    // Getters
-    VkFormat getColorFormat() const { return swapChainImageFormat_; }
-
-    VkFormat getDepthFormat() {
-        return swapChainDepthFormat_ == VK_FORMAT_UNDEFINED ? findDepthFormat() : swapChainDepthFormat_;
+    // Recreate now uses vk::RenderPass
+    void recreate(vk::RenderPass renderPass) {
+        cleanup();
+        init();
+        createFramebuffers(renderPass);
     }
 
-    VkExtent2D getExtent() const { return swapChainExtent_; }
-    VkSwapchainKHR getHandle() const { return swapChain_; }
-    const std::vector<VkImageView> &getImageViews() const { return swapChainImageViews_; }
+    void cleanup();
 
-    std::vector<VkFramebuffer> getFramebuffers() { return swapChainFramebuffers_; }
+    struct SwapChainSupportDetails {
+        vk::SurfaceCapabilitiesKHR capabilities;
+        std::vector<vk::SurfaceFormatKHR> formats;
+        std::vector<vk::PresentModeKHR> presentModes;
+    };
 
-    void createFramebuffers(VkRenderPass renderPass);
+    // Use vk:: types and global dispatcher
+    static bool isDeviceAdequate(vk::PhysicalDevice device, vk::SurfaceKHR surface);
+    static SwapChainSupportDetails querySwapChainSupport(vk::PhysicalDevice device, vk::SurfaceKHR surface);
 
-    [[nodiscard]] const std::vector<VkImage> &getImages() const { return swapChainImages_; }
+    // Getters
+    vk::Format getColorFormat() const { return swapChainImageFormat_; }
+    vk::Extent2D getExtent() const { return swapChainExtent_; }
+    vk::SwapchainKHR getHandle() const { return swapChain_; }
+    const std::vector<vk::ImageView> &getImageViews() const { return swapChainImageViews_; }
+    [[nodiscard]] const std::vector<vk::Framebuffer> &getFramebuffers() const { return swapChainFramebuffers_; }
+    [[nodiscard]] vk::Format getDepthFormat() const { return swapChainDepthFormat_; }
+
+    void createFramebuffers(vk::RenderPass renderPass);
 
 private:
     VulkanContext &context_;
-    VkSwapchainKHR swapChain_ = VK_NULL_HANDLE;
-    std::vector<VkImage> swapChainImages_;
-    VkFormat swapChainImageFormat_ = VK_FORMAT_UNDEFINED;
-    VkExtent2D swapChainExtent_ = {0, 0};
     GLFWwindow *window_;
-    std::vector<VkImageView> swapChainImageViews_;
-    std::vector<VkFramebuffer> swapChainFramebuffers_;
-    VkImage depthImage;
-    VkDeviceMemory depthImageMemory;
-    VkImageView depthImageView;
-    VkFormat swapChainDepthFormat_ = VK_FORMAT_UNDEFINED;
 
+    vk::SwapchainKHR swapChain_;
+    std::vector<vk::Image> swapChainImages_; // Changed to vk::Image
+    vk::Format swapChainImageFormat_;
+    vk::Extent2D swapChainExtent_;
+
+    std::vector<vk::ImageView> swapChainImageViews_;
+    std::vector<vk::Framebuffer> swapChainFramebuffers_;
+
+    // Depth Resources
+    vk::Image depthImage;
+    vk::DeviceMemory depthImageMemory;
+    vk::ImageView depthImageView;
+    vk::Format swapChainDepthFormat_;
 
     void init() {
         createSwapChain();
         createImageViews();
-        // Create depth resources AFTER you know the new swapchain extent (width/height)
-        // but BEFORE you create framebuffers.
         createDepthResources();
     }
 
     void createImageViews();
-
     void createSwapChain();
     void createDepthResources();
 
-    static SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface);
+    vk::ImageView createImageView(vk::Image image, vk::Format format, vk::ImageAspectFlags aspectFlags) const;
 
-    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities);
+    vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities) const;
 
-    VkFormat findDepthFormat();
+    // Helper for depth image creation
+    void createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling,
+                     vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties,
+                     vk::Image &image, vk::DeviceMemory &imageMemory) const;
 
-    void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
-                     VkMemoryPropertyFlags properties, VkImage &image, VkDeviceMemory &imageMemory) const;
-    VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) const;
-
+    vk::Format findDepthFormat();
 };

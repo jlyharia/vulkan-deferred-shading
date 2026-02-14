@@ -7,7 +7,7 @@
 #include <GLFW/glfw3.h>
 #include <memory>
 
-#include "renderer/Cemera.hpp"
+#include "renderer/Camera.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 class Renderer;
@@ -86,9 +86,10 @@ private:
 
     // 5. Pipeline (Destroyed FIRST)
     // Depends on the Render Pass
-    std::unique_ptr<GraphicsPipeline> graphicsPipeline_;
 
+    std::unique_ptr<GraphicsPipeline> graphicsPipeline_;
     std::unique_ptr<Renderer> renderer_;
+
 
     void initWindow();
 
