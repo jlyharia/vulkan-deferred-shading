@@ -3,9 +3,13 @@
 //
 
 #pragma once
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
+
+#ifndef VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
+#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
+#endif
+
 #include <vulkan/vulkan.hpp>
-#include <vulkan/vulkan.h>
+
 #include <GLFW/glfw3.h>
 #include <memory>
 #include <optional>
@@ -58,52 +62,63 @@ public:
      *
      * @return Logical Device
      */
-    [[nodiscard]] VkDevice getDevice() const { return vkDevice_; }
+    [[nodiscard]] vk::Device getDevice() const { return vkDevice_; }
     /**
      *
      * @return Physical Device
      */
-    [[nodiscard]] VkPhysicalDevice getPhysicalDevice() const { return physicalDevice_; }
-    [[nodiscard]] VkSurfaceKHR getSurface() const { return surface_; }
+    [[nodiscard]] vk::PhysicalDevice getPhysicalDevice() const { return physicalDevice_; }
+    [[nodiscard]] vk::SurfaceKHR getSurface() const { return surface_; }
 
-    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
+    QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice device) const;
 
-    [[nodiscard]] VkQueue getGraphicsQueue() const { return graphicsQueue_; }
-    [[nodiscard]] VkQueue getPresentQueue() const { return presentQueue_; }
-    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
+    [[nodiscard]] vk::Queue getGraphicsQueue() const { return graphicsQueue_; }
+    [[nodiscard]] vk::Queue getPresentQueue() const { return presentQueue_; }
+    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
 
-    VkFormat findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling,
-                                 VkFormatFeatureFlags features);
+    // vk::Format findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling,
+    //                              VkFormatFeatureFlags features);
+    vk::Format findSupportedFormat(const std::vector<vk::Format> &candidates,
+                                   vk::ImageTiling tiling,
+                                   vk::FormatFeatureFlags features) const;
 
 private:
     GLFWwindow *window_;
-    VkInstance instance_ = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
-    std::unique_ptr<Validation> validation_;
-    VkDevice vkDevice_;
-    VkSurfaceKHR surface_;
-    VkQueue graphicsQueue_;
-    VkQueue presentQueue_;
 
+    // Core Handles
+    vk::Instance instance_;
+    vk::PhysicalDevice physicalDevice_;
+    vk::Device vkDevice_;
+
+    // This replaces the need for the global storage macro
+    // vk::DispatchLoaderDynamic dldy_;
+    // Surface & Queues
+    vk::SurfaceKHR surface_; // vulkan.hpp wrapper for VkSurfaceKHR
+    vk::Queue graphicsQueue_; // Returned by vkDevice_.getQueue()
+    vk::Queue presentQueue_;
+
+    // Debugging
+    vk::DebugUtilsMessengerEXT debugMessenger_;
+    std::unique_ptr<Validation> validation_;
     void createInstance();
 
     void setupDebugMessenger();
 
-    std::vector<const char *> getRequiredExtensions();
+    std::vector<const char *> getRequiredExtensions() const;
 
     VkResult CreateDebugUtilsMessengerEXT(const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
                                           VkDebugUtilsMessengerEXT *pDebugMessenger);
 
-    void DestroyDebugUtilsMessengerEXT(VkDebugUtilsMessengerEXT debugMessenger);
+    void DestroyDebugUtilsMessengerEXT(VkDebugUtilsMessengerEXT debugMessenger) const;
 
     void pickPhysicalDevice();
 
     void createLogicalDevice();
 
-    bool isDeviceSuitable(VkPhysicalDevice device);
+    bool isDeviceSuitable(vk::PhysicalDevice device) const;
 
     void createSurface();
 
-    bool checkDeviceExtensionSupport(VkPhysicalDevice device);
+    static bool checkDeviceExtensionSupport(vk::PhysicalDevice device);
+    int rateDeviceSuitability(vk::PhysicalDevice device);
 };
