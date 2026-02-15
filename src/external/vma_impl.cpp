@@ -3,7 +3,7 @@
 //
 
 // Standard comment: This file compiles the VMA implementation.
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 
 #define VMA_IMPLEMENTATION
 #define VMA_STATIC_VULKAN_FUNCTIONS 0

@@ -63,7 +63,7 @@ Renderer::~Renderer() {
 
     vkDestroyDescriptorSetLayout(context_.getDevice(), descriptorSetLayout_, nullptr);
     std::cerr << "[Destructor] Renderer-descriptorSetLayout_..." << std::endl;
-    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++) {
+    for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         // VMA automatically handles the Unmapping if you used
         // VMA_ALLOCATION_CREATE_MAPPED_BIT.
         if (uniformBuffers_[i] != VK_NULL_HANDLE) {
@@ -145,12 +145,12 @@ void Renderer::createCommandPool() {
 }
 
 void Renderer::createCommandBuffers() {
-    commandBuffers_.resize(engine::MAX_FRAMES_IN_FLIGHT);
+    commandBuffers_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
 
     auto allocInfo = vk::CommandBufferAllocateInfo()
                      .setCommandPool(commandPool_)
                      .setLevel(vk::CommandBufferLevel::ePrimary)
-                     .setCommandBufferCount(static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT));
+                     .setCommandBufferCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
 
     commandBuffers_ = context_.getDevice().allocateCommandBuffers(allocInfo);
 }
@@ -202,7 +202,7 @@ void Renderer::createSyncObjects() {
     const auto imageCount = static_cast<uint32_t>(swapChain_.getImageViews().size());
 
     // 1. Resize containers to match your logic
-    inFlightFences_.resize(engine::MAX_FRAMES_IN_FLIGHT);
+    inFlightFences_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
     imageAvailableSemaphores_.resize(imageCount);
     renderFinishedSemaphores_.resize(imageCount);
     imagesInFlight.resize(imageCount, nullptr);
@@ -213,7 +213,7 @@ void Renderer::createSyncObjects() {
     fenceInfo.setFlags(vk::FenceCreateFlagBits::eSignaled);
 
     // 2. Create Fences (Per Frame Slot: MAX_FRAMES_IN_FLIGHT)
-    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++) {
+    for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         inFlightFences_[i] = device.createFence(fenceInfo);
     }
 
@@ -292,7 +292,7 @@ void Renderer::drawFrame(vk::Pipeline pipeline, bool framebufferResized, const C
     }
 
     // 8. Advance Frame Index
-    currentFrame = (currentFrame + 1) % engine::MAX_FRAMES_IN_FLIGHT;
+    currentFrame = (currentFrame + 1) % engineConfig::MAX_FRAMES_IN_FLIGHT;
 }
 
 void Renderer::recreateSwapChain() {
@@ -372,11 +372,11 @@ void Renderer::createIndexBuffer() {
 void Renderer::createUniformBuffers() {
     vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
 
-    uniformBuffers_.resize(engine::MAX_FRAMES_IN_FLIGHT);
-    uniformBuffersAllocation_.resize(engine::MAX_FRAMES_IN_FLIGHT);
-    uniformBuffersMapped_.resize(engine::MAX_FRAMES_IN_FLIGHT);
+    uniformBuffers_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
+    uniformBuffersAllocation_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
+    uniformBuffersMapped_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
 
-    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++) {
+    for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         VmaAllocationInfo allocInfo;
 
         createBuffer(
@@ -478,26 +478,26 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera) 
 void Renderer::createDescriptorPool() {
     auto poolSize = vk::DescriptorPoolSize()
                     .setType(vk::DescriptorType::eUniformBuffer)
-                    .setDescriptorCount(static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT));
+                    .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
 
     auto poolInfo = vk::DescriptorPoolCreateInfo()
                     .setPoolSizeCount(1)
                     .setPPoolSizes(&poolSize)
-                    .setMaxSets(static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT));
+                    .setMaxSets(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
 
     descriptorPool_ = context_.getDevice().createDescriptorPool(poolInfo);
 }
 
 void Renderer::createDescriptorSets() {
-    std::vector<vk::DescriptorSetLayout> layouts(engine::MAX_FRAMES_IN_FLIGHT, descriptorSetLayout_);
+    std::vector<vk::DescriptorSetLayout> layouts(engineConfig::MAX_FRAMES_IN_FLIGHT, descriptorSetLayout_);
     auto allocInfo = vk::DescriptorSetAllocateInfo()
                      .setDescriptorPool(descriptorPool_)
-                     .setDescriptorSetCount(static_cast<uint32_t>(engine::MAX_FRAMES_IN_FLIGHT))
+                     .setDescriptorSetCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT))
                      .setPSetLayouts(layouts.data());
 
     descriptorSets_ = context_.getDevice().allocateDescriptorSets(allocInfo);
 
-    for (size_t i = 0; i < engine::MAX_FRAMES_IN_FLIGHT; i++) {
+    for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         auto bufferInfo = vk::DescriptorBufferInfo()
                           .setBuffer(uniformBuffers_[i])
                           .setOffset(0)
