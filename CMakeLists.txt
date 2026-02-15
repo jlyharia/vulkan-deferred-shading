@@ -21,6 +21,8 @@ find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(glslang CONFIG REQUIRED)
+find_package(stb REQUIRED)
+find_package(tinyobjloader REQUIRED)
 
 
 # ------------------------------------------------------------
@@ -68,11 +70,7 @@ target_compile_definitions(defer_render PRIVATE
 # Fix the include priority: Put Vulkan SDK FIRST
 target_include_directories(defer_render
         PRIVATE
-#        "$ENV{VULKAN_SDK}/include"  # <--- Ensure this is at the top
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/external
-        ${CMAKE_SOURCE_DIR}/external/tinyobj
-        ${CMAKE_SOURCE_DIR}/external/stb
 )
 
 # ------------------------------------------------------------
@@ -81,13 +79,15 @@ target_include_directories(defer_render
 
 target_link_libraries(${TARGET_NAME}
         PRIVATE
-        Vulkan::Loader              #
+        Vulkan::Loader
         vulkan-headers::vulkan-headers
         GPUOpen::VulkanMemoryAllocator
-        glfw                        #
+        glfw
         glm::glm
-        glslang::glslang            #
-        glslang::SPIRV              #
+        glslang::glslang
+        glslang::SPIRV
+        stb::stb
+        tinyobjloader::tinyobjloader
 )
 
 # copy assets, models, texture ...etc put this after add_executable(..)
@@ -102,9 +102,6 @@ endif ()
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/shaders)
 
 # Find glslangValidator
-#find_program(GLSLANG_VALIDATOR
-#        NAMES glslangValidator
-#        HINTS /usr/bin /home/johnny/VulkanSDK/1.4.335.0/x86_64/bin/)
 
 find_program(GLSLANG_VALIDATOR
         NAMES glslangValidator glslc

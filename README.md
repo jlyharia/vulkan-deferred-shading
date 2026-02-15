@@ -29,7 +29,7 @@ Step
    echo "tools.system.package_manager:mode = install" >> $(conan config home)/global.conf
    echo "tools.system.package_manager:sudo = True" >> $(conan config home)/global.conf
    ```
-
+6. conan build command `conan install . --build=missing`
 ## Project Structure
 
 This project follows a **Project-Base (Sibling)** architecture. Headers (`.hpp`) and source files (`.cpp`) are kept in the same directory to improve developer velocity and maintain clear module boundaries.

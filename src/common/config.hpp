@@ -4,7 +4,7 @@
 
 #pragma once
 
-namespace engine {
+namespace engineConfig {
     // We use 'inline' so it can be included in multiple files without linker errors
     inline constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
