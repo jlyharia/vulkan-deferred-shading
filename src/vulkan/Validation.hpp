@@ -12,11 +12,9 @@ public:
 
     ~Validation() = default;
 
-    bool isEnabled() const { return enableLayers_; }
-    const std::vector<const char *> &getValidationLayers() const { return validationLayers_; }
+    [[nodiscard]] bool isEnabled() const { return enableLayers_; }
+    [[nodiscard]] const std::vector<const char *> &getValidationLayers() const { return validationLayers_; }
 
-    //Populate VkDebugUtilsMessengerCreateInfoEXT
-    // void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo);
     void populateDebugMessengerCreateInfo(vk::DebugUtilsMessengerCreateInfoEXT &createInfo);
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(

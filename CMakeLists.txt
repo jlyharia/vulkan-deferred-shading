@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 3.21) # 4.1 not required unless you need it
+cmake_minimum_required(VERSION 3.24...3.31) # 4.1 not required unless you need it
+# Add this BEFORE project() to help older dependencies
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(defer_render)
 
 set(TARGET_NAME defer_render)
@@ -12,11 +14,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ------------------------------------------------------------
 # Use VULKAN_SDK environment variable if set
 
-find_package(Vulkan REQUIRED)
+#find_package(Vulkan REQUIRED)
+find_package(VulkanHeaders REQUIRED)
+find_package(VulkanLoader REQUIRED)
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
+find_package(glslang CONFIG REQUIRED)
 
-add_definitions(-DVULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1)
 
 # ------------------------------------------------------------
 # Target
@@ -58,11 +63,12 @@ target_compile_definitions(defer_render PRIVATE
         VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
         VULKAN_HPP_STORAGE_SHARED=1
         VULKAN_HPP_STORAGE_SHARED_EXPORT=1
+        GLM_ENABLE_EXPERIMENTAL                # <--- fix GTX
 )
 # Fix the include priority: Put Vulkan SDK FIRST
 target_include_directories(defer_render
         PRIVATE
-        "$ENV{VULKAN_SDK}/include"  # <--- Ensure this is at the top
+#        "$ENV{VULKAN_SDK}/include"  # <--- Ensure this is at the top
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/external
         ${CMAKE_SOURCE_DIR}/external/tinyobj
@@ -72,11 +78,16 @@ target_include_directories(defer_render
 # ------------------------------------------------------------
 # Link libraries
 # ------------------------------------------------------------
-target_link_libraries(defer_render
+
+target_link_libraries(${TARGET_NAME}
         PRIVATE
-        Vulkan::Vulkan
-        glfw
+        Vulkan::Loader              #
+        vulkan-headers::vulkan-headers
+        GPUOpen::VulkanMemoryAllocator
+        glfw                        #
         glm::glm
+        glslang::glslang            #
+        glslang::SPIRV              #
 )
 
 # copy assets, models, texture ...etc put this after add_executable(..)
@@ -91,9 +102,16 @@ endif ()
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/shaders)
 
 # Find glslangValidator
+#find_program(GLSLANG_VALIDATOR
+#        NAMES glslangValidator
+#        HINTS /usr/bin /home/johnny/VulkanSDK/1.4.335.0/x86_64/bin/)
+
 find_program(GLSLANG_VALIDATOR
-        NAMES glslangValidator
-        HINTS /usr/bin /home/johnny/VulkanSDK/1.4.335.0/x86_64/bin/)
+        NAMES glslangValidator glslc
+        HINTS
+        "$ENV{VULKAN_SDK}/bin"
+        "$ENV{VULKAN_SDK}/x86_64/bin" # Standard Vulkan SDK layout
+)
 if (NOT GLSLANG_VALIDATOR)
     message(FATAL_ERROR "glslangValidator not found! Make sure Vulkan SDK is installed.")
 endif ()

@@ -3,11 +3,12 @@
 #include <string>
 #include <vector>
 #include <GLFW/glfw3.h>
-#include <vma/vk_mem_alloc.h>
 #include <vulkan/vulkan.hpp>
 
 #include "Camera.hpp"
 #include "system/ModelSystem.hpp"
+
+#include <vk_mem_alloc.h>
 
 // Forward declarations
 class RenderPass;
