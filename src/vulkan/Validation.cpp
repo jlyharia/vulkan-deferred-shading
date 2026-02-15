@@ -28,7 +28,8 @@ void Validation::populateDebugMessengerCreateInfo(vk::DebugUtilsMessengerCreateI
     );
 
     // Casting the callback to the required PFN type
-    createInfo.setPfnUserCallback(debugCallback);
+    // Use the vk namespace function pointer type
+    createInfo.setPfnUserCallback(reinterpret_cast<vk::PFN_DebugUtilsMessengerCallbackEXT>(debugCallback));
     createInfo.setPUserData(nullptr);
 }
 
@@ -45,24 +46,6 @@ VKAPI_ATTR VkBool32 VKAPI_CALL Validation::debugCallback(
 bool Validation::checkLayerSupport() {
     std::cout << "VK_LAYER_PATH = " << std::getenv("VK_LAYER_PATH") << std::endl;
     std::cout << "LD_LIBRARY_PATH = " << std::getenv("LD_LIBRARY_PATH") << std::endl;
-    // uint32_t layerCount;
-    // vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-    //
-    // std::vector<VkLayerProperties> availableLayers(layerCount);
-    // vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
-    //
-    // for (const char *layerName: validationLayers_) {
-    //     bool found = false;
-    //     for (const auto &layerProperties: availableLayers) {
-    //         std::cout << layerProperties.layerName << std::endl;
-    //         if (strcmp(layerName, layerProperties.layerName) == 0) {
-    //             found = true;
-    //             break;
-    //         }
-    //     }
-    //     if (!found) return false;
-    // }
-    // return true;
     auto availableLayers = vk::enumerateInstanceLayerProperties();
 
     for (const char* layerName : validationLayers_) {

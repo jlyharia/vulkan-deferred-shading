@@ -8,7 +8,27 @@ To enable validation layers and debug markers when using a local SDK install, yo
    ```text
    VK_LAYER_PATH=/home/johnny/VulkanSDK/1.4.335.0/x86_64/share/vulkan/explicit_layer.d
    LD_LIBRARY_PATH=/home/johnny/VulkanSDK/1.4.335.0/x86_64/lib
+   ```
+3. cmake env variable
+   ```text
+   VULKAN_SDK=~/VulkanSDK/1.4.335.0/x86_64
+   ```
 
+## Package Management
+### Conan
+- conan center https://conan.io/center
+
+Step
+1. sudo apt update
+2. sudo apt install pipx 
+3. pipx ensurepath
+4. pipx install conan
+5. Install Conan plugin in clion
+   ```text
+   # This adds the "install" mode to your global configuration
+   echo "tools.system.package_manager:mode = install" >> $(conan config home)/global.conf
+   echo "tools.system.package_manager:sudo = True" >> $(conan config home)/global.conf
+   ```
 
 ## Project Structure
 
