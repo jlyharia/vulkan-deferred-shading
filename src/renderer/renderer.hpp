@@ -1,8 +1,8 @@
 #pragma once
 
+#include <GLFW/glfw3.h>
 #include <string>
 #include <vector>
-#include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
 
 #include "Camera.hpp"
@@ -16,11 +16,8 @@ class SwapChain;
 class VulkanContext;
 
 class Renderer {
-public:
-    Renderer(VulkanContext &context,
-             SwapChain &swapChain,
-             RenderPass &renderPass,
-             GLFWwindow *window);
+  public:
+    Renderer(VulkanContext &context, SwapChain &swapChain, RenderPass &renderPass, GLFWwindow *window);
     ~Renderer();
 
     // Disable copying
@@ -37,7 +34,7 @@ public:
 
     [[nodiscard]] vk::DescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_; }
 
-private:
+  private:
     void createCommandPool();
     void createCommandBuffers();
     void createSyncObjects();
@@ -49,21 +46,20 @@ private:
     void createIndexBuffer();
 
     // Your updated C++ style buffer helper
-    void createBuffer(vk::DeviceSize size,
-                      vk::BufferUsageFlags usage,
-                      VmaMemoryUsage vmaUsage,
-                      vk::Buffer &buffer,
-                      VmaAllocation &allocation,
-                      VmaAllocationCreateFlags vmaFlags = 0,
+    void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage vmaUsage, vk::Buffer &buffer,
+                      VmaAllocation &allocation, VmaAllocationCreateFlags vmaFlags = 0,
                       VmaAllocationInfo *outAllocInfo = nullptr) const;
 
     void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const;
 
-    void createAllocator();
     void createUniformBuffers();
     void updateUniformBuffer(uint32_t currentFrame, const Camera &camera) const;
     void createDescriptorPool();
     void createDescriptorSets();
+    void transitionImageLayout(vk::CommandBuffer cmd, vk::Image image,
+                                     vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+                                     vk::ImageAspectFlags aspectMask) const;
+
 
     // --- Members ---
     VulkanContext &context_;
@@ -84,8 +80,8 @@ private:
 
     uint32_t currentFrame = 0;
 
-    // Memory Resources (VMA + vk::Buffer)
-    VmaAllocator vmaAllocator = nullptr;
+    // // Memory Resources (VMA + vk::Buffer)
+    // VmaAllocator vmaAllocator = nullptr;
 
     vk::Buffer vertexBuffer_;
     VmaAllocation vertexBufferAllocation_ = nullptr;

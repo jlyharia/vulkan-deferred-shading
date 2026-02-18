@@ -34,6 +34,7 @@ VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
     createSurface();
     pickPhysicalDevice();
     createLogicalDevice();
+    initVmaAllocator();
 }
 
 VulkanContext::~VulkanContext() {
@@ -60,6 +61,9 @@ VulkanContext::~VulkanContext() {
     //     instance_.destroy();
     // }
     std::cerr << "[Destructor] VulkanContext starting..." << std::endl;
+    if (vmaAllocator_) {
+        vmaDestroyAllocator(vmaAllocator_);
+    }
     vkDestroySurfaceKHR(instance_, surface_, nullptr);
     std::cerr << "[Destructor] VulkanContext-vkDestroySurfaceKHR..." << std::endl;
     if (this->vkDevice_ != VK_NULL_HANDLE) {
@@ -74,7 +78,6 @@ VulkanContext::~VulkanContext() {
     if (instance_ != VK_NULL_HANDLE) {
         vkDestroyInstance(instance_, nullptr);
     }
-
 
 }
 
@@ -174,7 +177,13 @@ void VulkanContext::createLogicalDevice() {
     }
 
     vk::PhysicalDeviceVulkan13Features features13;
-    features13.setDynamicRendering(true).setSynchronization2(true);
+    features13.setDynamicRendering(true)
+              .setSynchronization2(true)
+              .setMaintenance4(true);
+
+    vk::PhysicalDeviceVulkan12Features features12;
+    features12.setBufferDeviceAddress(true)
+              .setPNext(&features13);
 
     vk::PhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.setSamplerAnisotropy(true);
@@ -183,7 +192,7 @@ void VulkanContext::createLogicalDevice() {
     createInfo.setQueueCreateInfos(queueCreateInfos)
               .setPEnabledFeatures(&deviceFeatures)
               .setPEnabledExtensionNames(deviceExtensions)
-              .setPNext(&features13);
+              .setPNext(&features12);
 
     if (validation_->isEnabled()) {
         createInfo.setPEnabledLayerNames(validation_->getValidationLayers());
@@ -302,4 +311,24 @@ void VulkanContext::DestroyDebugUtilsMessengerEXT(VkDebugUtilsMessengerEXT debug
     if (func) {
         func(instance_, debugMessenger, nullptr);
     }
+}
+
+void VulkanContext::initVmaAllocator() {
+    VmaVulkanFunctions vulkanFunctions{};
+    vulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+    vulkanFunctions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
+
+    VmaAllocatorCreateInfo allocatorInfo{};
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    allocatorInfo.instance = instance_;
+    allocatorInfo.physicalDevice = physicalDevice_;
+    allocatorInfo.device = vkDevice_;
+    allocatorInfo.pVulkanFunctions = &vulkanFunctions;
+
+    if (const VkResult res = vmaCreateAllocator(&allocatorInfo, &vmaAllocator_); res != VK_SUCCESS) {
+        throw std::runtime_error("failed to create VMA allocator!");
+    }
+    VmaAllocatorInfo info{};
+    vmaGetAllocatorInfo(vmaAllocator_, &info);
+
 }

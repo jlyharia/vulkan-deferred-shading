@@ -3,8 +3,8 @@
 //
 
 #pragma once
-#include <chrono>
 #include <GLFW/glfw3.h>
+#include <chrono>
 #include <memory>
 
 #include "renderer/Camera.hpp"
@@ -16,7 +16,7 @@ class GraphicsPipeline;
 class SwapChain;
 
 class App {
-public:
+  public:
     App(int width, int height, const char *title);
 
     // ============================================================
@@ -64,7 +64,7 @@ public:
 
     void run();
 
-private:
+  private:
     // Basic Data
     int width_;
     int height_;
@@ -79,7 +79,8 @@ private:
 
     // 3. Render Pass (The "Contract")
     // Needs to be declared BEFORE the pipeline and swapchain/framebuffers
-    std::unique_ptr<RenderPass> renderPass_;;
+    std::unique_ptr<RenderPass> renderPass_;
+    ;
 
     // 4. Swapchain (Owns Images/Views/Framebuffers)
     std::unique_ptr<SwapChain> swapchain_;
@@ -89,7 +90,6 @@ private:
 
     std::unique_ptr<GraphicsPipeline> graphicsPipeline_;
     std::unique_ptr<Renderer> renderer_;
-
 
     void initWindow();
 

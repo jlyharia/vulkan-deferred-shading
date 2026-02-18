@@ -11,40 +11,38 @@ class VulkanContext;
 
 class GraphicsPipeline {
 public:
-    GraphicsPipeline(VulkanContext& context,
-                     SwapChain& swapChain,
-                     vk::RenderPass renderPass,
+    // Constructor & Destructor
+    GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
                      vk::DescriptorSetLayout descriptorSetLayout)
-        : context_(context), swapChain_(swapChain), renderPass_(renderPass) {
-
+        : context_(context), swapChain_(swapChain) {
         // 1. Create the Layout FIRST
         createPipelineLayout(descriptorSetLayout);
-
         // 2. Create the Pipeline SECOND
         createGraphicsPipeline();
     }
-
     ~GraphicsPipeline();
 
-    // Disable copy
-    GraphicsPipeline(const GraphicsPipeline&) = delete;
-    GraphicsPipeline& operator=(const GraphicsPipeline&) = delete;
+    // Non-copyable
+    GraphicsPipeline(const GraphicsPipeline &) = delete;
+    GraphicsPipeline &operator=(const GraphicsPipeline &) = delete;
 
+    // Getters
     [[nodiscard]] vk::Pipeline getPipeline() const { return graphicsPipeline_; }
     [[nodiscard]] vk::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
 
 private:
-    VulkanContext& context_;
-    SwapChain& swapChain_;
+    // Context references
+    VulkanContext &context_;
+    SwapChain &swapChain_;
 
-    // Updated to C++ handles
+    // Pipeline resources
     vk::PipelineLayout pipelineLayout_;
-    vk::RenderPass renderPass_;
     vk::Pipeline graphicsPipeline_;
 
+    // Creation methods
     void createPipelineLayout(vk::DescriptorSetLayout dsLayout);
     void createGraphicsPipeline();
 
-    // Helper returns the C++ wrapper
-    vk::ShaderModule createShaderModule(const std::vector<char>& code) const;
+    // Helper methods
+    [[nodiscard]] vk::ShaderModule createShaderModule(const std::vector<char> &code) const;
 };

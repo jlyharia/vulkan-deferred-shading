@@ -14,8 +14,7 @@
 #include "vulkan/render_pass.hpp"
 #include "vulkan/swap_chain.hpp"
 
-App::App(int width, int height, const char *title)
-    : width_(width), height_(height), title_(title) {
+App::App(int width, int height, const char *title) : width_(width), height_(height), title_(title) {
 }
 
 App::~App() {
@@ -59,10 +58,8 @@ void App::framebufferResizeCallback(GLFWwindow *window, int width, int height) {
 void App::initVulkan() {
     vulkanContext_ = std::make_unique<VulkanContext>(window_, true);
     swapchain_ = std::make_unique<SwapChain>(*vulkanContext_, window_);
-    renderPass_ = std::make_unique<RenderPass>(*vulkanContext_,
-                                               swapchain_->getColorFormat(),
-                                               swapchain_->getDepthFormat());
-    swapchain_->createFramebuffers(renderPass_->getRenderPass());
+    renderPass_ =
+        std::make_unique<RenderPass>(*vulkanContext_, swapchain_->getColorFormat(), swapchain_->getDepthFormat());
 
     // --- NEW PROFESSIONAL SEQUENCE ---
 
@@ -73,12 +70,10 @@ void App::initVulkan() {
     renderer_->createDescriptorSetLayout();
 
     // 3. Create Pipeline (The Logic) - Pass the layout FROM the renderer
-    graphicsPipeline_ = std::make_unique<GraphicsPipeline>(
-        *vulkanContext_,
-        *swapchain_,
-        renderPass_->getRenderPass(),
-        renderer_->getDescriptorSetLayout() // <--- This is the key link
-        );
+    graphicsPipeline_ =
+        std::make_unique<GraphicsPipeline>(*vulkanContext_, *swapchain_,
+                                           renderer_->getDescriptorSetLayout() // <--- This is the key link
+            );
 
     // 4. Initialize Renderer Resources (The Data)
     // Pass the pipeline layout so the Renderer knows how to bind sets
@@ -120,7 +115,6 @@ void App::run() {
     mainLoop();
 }
 
-
 void App::updateFrameTime() {
     // 1. Calculate delta time
     const auto currentTime = std::chrono::high_resolution_clock::now();
@@ -142,7 +136,6 @@ void App::updateFrameTime() {
         timer = 0.0f;
     }
 }
-
 
 void App::processInput() {
     // 1. Calculate DeltaTime

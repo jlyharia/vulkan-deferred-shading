@@ -30,46 +30,17 @@ Step
    echo "tools.system.package_manager:sudo = True" >> $(conan config home)/global.conf
    ```
 6. conan build command `conan install . --build=missing`
-## Project Structure
-
-This project follows a **Project-Base (Sibling)** architecture. Headers (`.hpp`) and source files (`.cpp`) are kept in the same directory to improve developer velocity and maintain clear module boundaries.
-
-```text
-defer_render/
-├── CMakeLists.txt          # Build logic & Shader compilation rules
-├── README.md               # Setup instructions & Environment variables
-├── main.cpp                # App entry point & Main loop
-├── shaders/                # GLSL source code (Vertex/Fragment/Compute)
-│   ├── gbuffer.vert
-│   ├── gbuffer.frag
-│   ├── lighting.vert
-│   └── lighting.frag
-├── assets/                 # Runtime resources (Models/Textures)
-│   ├── models/
-│   └── textures/
-└── src/                    # Source Code Root
-    ├── platform/           # Windowing & OS abstraction
-    │   ├── window.hpp
-    │   └── window.cpp
-    ├── vulkan/             # Low-level Vulkan wrappers (Toolbox)
-    │   ├── context.hpp     # Instance/Device/Queues
-    │   ├── context.cpp
-    │   ├── swapchain.hpp   # Presentation & Surface management
-    │   ├── swapchain.cpp
-    │   ├── buffer.hpp      # GPU Memory & Buffer helpers
-    │   ├── buffer.cpp
-    │   ├── image.hpp       # Texture & Sampler helpers
-    │   ├── image.cpp
-    │   ├── pipeline.hpp    # Pipeline & Shader State
-    │   └── pipeline.cpp
-    └── renderer/           # High-level Rendering Logic
-        ├── deferred_app.hpp# Main Renderer orchestration
-        ├── deferred_app.cpp
-        ├── gbuffer.hpp     # MRT (Multiple Render Target) management
-        └── gbuffer.cpp
-```
 
 ## Todo
 1. Delete vulkan resources per frame.
 2. Move vulkan resource destroy into queue.
 3. Show frame rate on screen UI.
+   Summary of Priority
+
+   ~~Refactor to Dynamic Rendering: Clean up the Vulkan boilerplate first.~~
+
+   Implement G-Buffer: Create the textures and the "Geometry" shaders.
+
+   Lighting Pass: Create the "Second Pass" that reads those textures.
+
+   Abstraction: Wrap these into classes like Shader, Buffer, and Texture to make the engine "Professional."
