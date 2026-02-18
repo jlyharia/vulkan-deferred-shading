@@ -1,7 +1,7 @@
 #include "graphics_pipeline.hpp"
-#include "swap_chain.hpp"
 #include "VulkanContext.hpp"
 #include "renderer/Vertex.hpp"
+#include "swap_chain.hpp"
 #include <fstream>
 #include <iostream>
 
@@ -17,7 +17,7 @@ std::vector<char> readFile(const std::string &filename) {
     file.read(buffer.data(), fileSize);
     return buffer;
 }
-}
+} // namespace
 
 GraphicsPipeline::~GraphicsPipeline() {
     std::cerr << "[Destructor] GraphicsPipeline starting..." << std::endl;
@@ -26,7 +26,6 @@ GraphicsPipeline::~GraphicsPipeline() {
     std::cerr << "[Destructor] GraphicsPipeline-graphicsPipeline_..." << std::endl;
     device.destroyPipelineLayout(pipelineLayout_);
     std::cerr << "[Destructor] GraphicsPipeline-pipelineLayout_..." << std::endl;
-
 }
 
 void GraphicsPipeline::createGraphicsPipeline() {
@@ -39,8 +38,7 @@ void GraphicsPipeline::createGraphicsPipeline() {
     // Shader Stages
     std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {
         vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eVertex, vertShaderModule, "main"),
-        vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eFragment, fragShaderModule, "main")
-    };
+        vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eFragment, fragShaderModule, "main")};
 
     // Vertex Input
     auto bindingDescription = Vertex::getBindingDescription();
@@ -56,9 +54,7 @@ void GraphicsPipeline::createGraphicsPipeline() {
                          .setPrimitiveRestartEnable(false);
 
     // Viewport State (Dynamic, so count only)
-    auto viewportState = vk::PipelineViewportStateCreateInfo()
-                         .setViewportCount(1)
-                         .setScissorCount(1);
+    auto viewportState = vk::PipelineViewportStateCreateInfo().setViewportCount(1).setScissorCount(1);
 
     // Rasterizer
     auto rasterizer = vk::PipelineRasterizationStateCreateInfo()
@@ -71,9 +67,8 @@ void GraphicsPipeline::createGraphicsPipeline() {
                       .setDepthBiasEnable(false);
 
     // Multisampling
-    auto multisampling = vk::PipelineMultisampleStateCreateInfo()
-                         .setSampleShadingEnable(false)
-                         .setRasterizationSamples(vk::SampleCountFlagBits::e1);
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo().setSampleShadingEnable(false).setRasterizationSamples(
+        vk::SampleCountFlagBits::e1);
 
     // Depth/Stencil
     auto depthStencil = vk::PipelineDepthStencilStateCreateInfo()
@@ -89,19 +84,26 @@ void GraphicsPipeline::createGraphicsPipeline() {
                                                    vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)
                                 .setBlendEnable(false);
 
-    auto colorBlending = vk::PipelineColorBlendStateCreateInfo()
-                         .setLogicOpEnable(false)
-                         .setAttachments(colorBlendAttachment);
+    auto colorBlending =
+        vk::PipelineColorBlendStateCreateInfo().setLogicOpEnable(false).setAttachments(colorBlendAttachment);
+
+    // --- NEW: Dynamic Rendering Info ---
+    // In a professional engine, these formats would be passed in as arguments
+    // or queried from your SwapChain class.
+    vk::Format colorFormat = swapChain_.getColorFormat(); // e.g., B8G8R8A8Unorm
+    vk::Format depthFormat = vk::Format::eD32Sfloat; // Must match your depth image
+
+    vk::PipelineRenderingCreateInfo pipelineRenderingInfo;
+    pipelineRenderingInfo.setColorAttachmentFormats(colorFormat)
+                         .setDepthAttachmentFormat(depthFormat);
 
     // Dynamic State
-    std::array<vk::DynamicState, 2> dynamicStates = {
-        vk::DynamicState::eViewport,
-        vk::DynamicState::eScissor
-    };
+    std::array<vk::DynamicState, 2> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
     auto dynamicStateInfo = vk::PipelineDynamicStateCreateInfo({}, dynamicStates);
 
     // Create Pipeline
     auto pipelineInfo = vk::GraphicsPipelineCreateInfo()
+                        .setPNext(&pipelineRenderingInfo)
                         .setStages(shaderStages)
                         .setPVertexInputState(&vertexInputInfo)
                         .setPInputAssemblyState(&inputAssembly)
@@ -111,9 +113,7 @@ void GraphicsPipeline::createGraphicsPipeline() {
                         .setPDepthStencilState(&depthStencil)
                         .setPColorBlendState(&colorBlending)
                         .setPDynamicState(&dynamicStateInfo)
-                        .setLayout(pipelineLayout_)
-                        .setRenderPass(renderPass_)
-                        .setSubpass(0);
+                        .setLayout(pipelineLayout_);
 
     auto result = context_.getDevice().createGraphicsPipeline(nullptr, pipelineInfo);
     if (result.result != vk::Result::eSuccess) {
@@ -127,23 +127,19 @@ void GraphicsPipeline::createGraphicsPipeline() {
 }
 
 vk::ShaderModule GraphicsPipeline::createShaderModule(const std::vector<char> &code) const {
-    auto createInfo = vk::ShaderModuleCreateInfo()
-                      .setCodeSize(code.size())
-                      .setPCode(reinterpret_cast<const uint32_t *>(code.data()));
+    auto createInfo =
+        vk::ShaderModuleCreateInfo().setCodeSize(code.size()).setPCode(reinterpret_cast<const uint32_t *>(code.data()));
 
     return context_.getDevice().createShaderModule(createInfo);
 }
 
 void GraphicsPipeline::createPipelineLayout(vk::DescriptorSetLayout dsLayout) {
     // Push Constant for shading mode
-    auto pushConstantRange = vk::PushConstantRange()
-                             .setStageFlags(vk::ShaderStageFlagBits::eFragment)
-                             .setOffset(0)
-                             .setSize(sizeof(int));
+    auto pushConstantRange =
+        vk::PushConstantRange().setStageFlags(vk::ShaderStageFlagBits::eFragment).setOffset(0).setSize(sizeof(int));
 
-    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo()
-                              .setSetLayouts(dsLayout)
-                              .setPushConstantRanges(pushConstantRange);
+    auto pipelineLayoutInfo =
+        vk::PipelineLayoutCreateInfo().setSetLayouts(dsLayout).setPushConstantRanges(pushConstantRange);
 
     pipelineLayout_ = context_.getDevice().createPipelineLayout(pipelineLayoutInfo);
 }

@@ -3,6 +3,7 @@
 //
 
 #pragma once
+#include <vk_mem_alloc.h>
 
 #ifndef VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
@@ -81,7 +82,7 @@ public:
     vk::Format findSupportedFormat(const std::vector<vk::Format> &candidates,
                                    vk::ImageTiling tiling,
                                    vk::FormatFeatureFlags features) const;
-
+    VmaAllocator getVmaAllocator() const { return vmaAllocator_; }
 private:
     GLFWwindow *window_;
 
@@ -100,6 +101,8 @@ private:
     // Debugging
     vk::DebugUtilsMessengerEXT debugMessenger_;
     std::unique_ptr<Validation> validation_;
+    // Memory Resources (VMA + vk::Buffer)
+    VmaAllocator vmaAllocator_ = nullptr;
     void createInstance();
 
     void setupDebugMessenger();
@@ -121,4 +124,5 @@ private:
 
     static bool checkDeviceExtensionSupport(vk::PhysicalDevice device);
     int rateDeviceSuitability(vk::PhysicalDevice device);
+    void initVmaAllocator();
 };
