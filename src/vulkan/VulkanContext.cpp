@@ -38,28 +38,6 @@ VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
 }
 
 VulkanContext::~VulkanContext() {
-    // Note: No 'dldy' passed anymore; functions use the global dispatcher automatically.
-    // if (vkDevice_) {
-    //     vkDevice_.waitIdle();
-    // }
-    //
-    // vkDestroySurfaceKHR(instance_, surface_, nullptr);
-    //
-    // if (instance_ && debugMessenger_) {
-    //     instance_.destroyDebugUtilsMessengerEXT(debugMessenger_);
-    // }
-    //
-    // if (vkDevice_) {
-    //     vkDevice_.destroy();
-    // }
-    //
-    // if (instance_ && surface_) {
-    //     instance_.destroySurfaceKHR(surface_);
-    // }
-    //
-    // if (instance_) {
-    //     instance_.destroy();
-    // }
     std::cerr << "[Destructor] VulkanContext starting..." << std::endl;
     if (vmaAllocator_) {
         vmaDestroyAllocator(vmaAllocator_);

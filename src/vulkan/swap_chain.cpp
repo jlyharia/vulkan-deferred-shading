@@ -10,16 +10,6 @@
 #include <vk_mem_alloc.h>
 
 namespace {
-// VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR> &availableFormats) {
-//     for (const auto &availableFormat : availableFormats) {
-//         if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace ==
-//             VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-//             return availableFormat;
-//         }
-//     }
-//
-//     return availableFormats[0];
-// }
 
 vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats) {
     // Look for B8G8R8A8_SRGB + SRGB_NONLINEAR
@@ -31,28 +21,6 @@ vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormat
     return (it != availableFormats.end()) ? *it : availableFormats[0];
 }
 
-// VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR> &availablePresentModes) {
-//     // 1. Try Mailbox (Best for uncapped FPS without tearing),
-//     // Many GPU doesn't support mailbox
-//     for (const auto &mode : availablePresentModes) {
-//         if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
-//             std::cout << "-- Present mode found: VK_PRESENT_MODE_MAILBOX_KHR" << std::endl;
-//             return mode;
-//         }
-//     }
-//
-//     // 2. Try Immediate (Absolute fastest, but causes screen tearing)
-//     for (const auto &mode : availablePresentModes) {
-//         if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-//             std::cout << "-- Present mode found: VK_PRESENT_MODE_IMMEDIATE_KHR" << std::endl;
-//             return mode;
-//         }
-//     }
-//
-//     // 3. Fallback to FIFO (Always supported, locks to 60/144Hz)
-//     std::cout << "-- Present mode default to: VK_PRESENT_MODE_FIFO_KHR" << std::endl;
-//     return VK_PRESENT_MODE_FIFO_KHR;
-// }
 
 vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes) {
     // Triple Buffering (Mailbox) is preferred for performance without tearing
@@ -64,6 +32,7 @@ vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &
 
     // Standard V-Sync (FIFO) is guaranteed to be supported by the Vulkan spec
     return vk::PresentModeKHR::eFifo;
+    // return vk::PresentModeKHR::eImmediate;
 }
 } // namespace
 

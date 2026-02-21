@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "Uniform.hpp"
+#include "UserInterface.hpp"
 #include "Vertex.hpp"
 #include "common/config.hpp"
 #include "vulkan/VulkanContext.hpp"
@@ -145,47 +146,10 @@ void Renderer::createCommandBuffers() {
     commandBuffers_ = context_.getDevice().allocateCommandBuffers(allocInfo);
 }
 
-// void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, vk::Pipeline pipeline, uint32_t imageIndex) const {
-//     //If you had a background scene that never changed, you could record the draw calls once at the start of the program and submit that same buffer every frame. In that case, you would use no flags (or eSimultaneousUse if you needed to submit it multiple times while it's still running, though that is rare and expensive).
-//     auto beginInfo = vk::CommandBufferBeginInfo();
-//     commandBuffer.begin(beginInfo);
-//
-//     std::array<vk::ClearValue, 2> clearValues;
-//     clearValues[0].color = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f});
-//     clearValues[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
-//
-//     auto renderPassInfo = vk::RenderPassBeginInfo()
-//                           .setRenderPass(renderPass_.getRenderPass())
-//                           .setFramebuffer(swapChain_.getFramebuffers()[imageIndex])
-//                           .setRenderArea(vk::Rect2D({0, 0}, swapChain_.getExtent()))
-//                           .setClearValueCount(static_cast<uint32_t>(clearValues.size()))
-//                           .setPClearValues(clearValues.data());
-//
-//     commandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
-//     {
-//         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-//
-//         // Set Dynamic Viewport/Scissor
-//         auto extent = swapChain_.getExtent();
-//         commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f));
-//         commandBuffer.setScissor(0, vk::Rect2D({0, 0}, extent));
-//
-//         commandBuffer.bindVertexBuffers(0, {vertexBuffer_}, {0});
-//         commandBuffer.bindIndexBuffer(indexBuffer_, 0, vk::IndexType::eUint32);
-//
-//         commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, activePipelineLayout_, 0,
-//                                          {descriptorSets_[currentFrame]}, {});
-//
-//         int shadingMode = 1;
-//         commandBuffer.pushConstants<int>(activePipelineLayout_, vk::ShaderStageFlagBits::eFragment, 0, shadingMode);
-//
-//         commandBuffer.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-//     }
-//     commandBuffer.endRenderPass();
-//     commandBuffer.end();
-// }
-
-void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, vk::Pipeline pipeline, uint32_t imageIndex) const {
+void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer,
+                                   vk::Pipeline pipeline,
+                                   uint32_t imageIndex,
+                                   UserInterface &userInterface) const {
     auto beginInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     commandBuffer.begin(beginInfo);
 
@@ -249,6 +213,13 @@ void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, vk::Pipeline
     }
     commandBuffer.endRendering();
 
+    // --- NEW: UI STEP ---
+    // At this point, the image is still in eColorAttachmentOptimal.
+    // We call UserInterface::recordCommands here.
+    // Inside that function, it will start a NEW beginRendering/endRendering block.
+    userInterface.recordCommands(commandBuffer, imageIndex);
+    // --------------------
+
     // 5. BARRIER: Replace "finalLayout = ePresentSrcKHR"
     // Transition back to presentation layout so the screen can show it.
     transitionImageLayout(commandBuffer, swapChain_.getImages()[imageIndex],
@@ -286,7 +257,10 @@ void Renderer::createSyncObjects() {
     }
 }
 
-void Renderer::drawFrame(vk::Pipeline pipeline, bool framebufferResized, const Camera &camera) {
+void Renderer::drawFrame(vk::Pipeline pipeline,
+                         bool framebufferResized,
+                         const Camera &camera,
+                         UserInterface &userInterface) {
     auto device = context_.getDevice();
 
     // 1. Wait for the Frame Slot to be free (CPU-GPU Sync)
@@ -319,7 +293,7 @@ void Renderer::drawFrame(vk::Pipeline pipeline, bool framebufferResized, const C
     updateUniformBuffer(currentFrame, camera);
 
     commandBuffers_[currentFrame].reset();
-    recordCommandBuffer(commandBuffers_[currentFrame], pipeline, imageIndex);
+    recordCommandBuffer(commandBuffers_[currentFrame], pipeline, imageIndex, userInterface);
 
     // 5. Submit Info (Modern C++ Style)
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
@@ -551,8 +525,10 @@ void Renderer::createDescriptorSetLayout() {
     descriptorSetLayout_ = context_.getDevice().createDescriptorSetLayout(layoutInfo);
 }
 
-void Renderer::transitionImageLayout(vk::CommandBuffer cmd, vk::Image image,
-                                     vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+void Renderer::transitionImageLayout(vk::CommandBuffer cmd,
+                                     vk::Image image,
+                                     vk::ImageLayout oldLayout,
+                                     vk::ImageLayout newLayout,
                                      vk::ImageAspectFlags aspectMask) const {
     vk::ImageMemoryBarrier2 barrier;
     barrier.setOldLayout(oldLayout)

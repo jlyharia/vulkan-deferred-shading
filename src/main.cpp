@@ -3,9 +3,10 @@
 #include <exception>
 
 #include "app/app.hpp"
+#include "common/config.hpp"
 
 int main() {
-    App app(800, 600, "Vulkan Deferred Renderer");
+    App app(engineConfig::MAIN_WINDOW_WIDTH, engineConfig::MAIN_WINDOW_HEIGHT, "Vulkan Deferred Renderer");
 
     try {
         app.run();
