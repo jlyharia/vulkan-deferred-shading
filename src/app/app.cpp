@@ -10,9 +10,12 @@
 #include <stdexcept>
 
 #include "renderer/renderer.hpp"
+#include "renderer/UserInterface.hpp"
 #include "vulkan/graphics_pipeline.hpp"
 #include "vulkan/render_pass.hpp"
 #include "vulkan/swap_chain.hpp"
+
+#include <imgui.h>
 
 App::App(int width, int height, const char *title) : width_(width), height_(height), title_(title) {
 }
@@ -21,7 +24,7 @@ App::~App() {
     // Wait for GPU to be idle before destroying anything
     if (vulkanContext_)
         vkDeviceWaitIdle(vulkanContext_->getDevice());
-
+    userInterface_.reset();
     renderer_.reset(); // 5. Destroys sync objects/cmd buffers
     graphicsPipeline_.reset(); // 4. Destroys pipeline
     renderPass_.reset(); // 3. Destroys render pass
@@ -74,7 +77,7 @@ void App::initVulkan() {
         std::make_unique<GraphicsPipeline>(*vulkanContext_, *swapchain_,
                                            renderer_->getDescriptorSetLayout() // <--- This is the key link
             );
-
+    userInterface_ = std::make_unique<UserInterface>(*vulkanContext_, *swapchain_, window_);
     // 4. Initialize Renderer Resources (The Data)
     // Pass the pipeline layout so the Renderer knows how to bind sets
     renderer_->initResources(graphicsPipeline_->getPipelineLayout(), "assets/model/sphere_grid.obj");
@@ -82,14 +85,50 @@ void App::initVulkan() {
 
 void App::mainLoop() {
     while (!glfwWindowShouldClose(window_)) {
+        // 1. Handle Window Events
         glfwPollEvents();
-        processInput();
-        // Keep the logic separate from the drawing
+
+        // 2. Update Timing and Logic
         updateFrameTime();
+        processInput();
+
+        // 3. Start ImGui Frame
+        // This must happen before any ImGui:: commands are called
+        userInterface_->beginFrame();
+
+        // ---------------------------------------------------------
+        // UI DEFINITION SECTION
+        // ---------------------------------------------------------
+        // This creates an invisible "docking zone" over your whole window.
+        // Your other windows (Stats, Settings) can now be snapped to the edges.
+        ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_PassthruCentralNode;
+        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockspace_flags);
+        ImGui::Begin("Performance Monitor");
+
+        float frameTimeMs = deltaTime * 1000.0f;
+        ImGui::Text("Frame Time: %.3f ms", frameTimeMs);
+        ImGui::Text("FPS: %.1f", 1.0f / (deltaTime > 0.0f ? deltaTime : 0.001f));
+
+        // Simple visualizer for frame stability
+        static float history[60] = {0};
+        static int offset = 0;
+        history[offset] = frameTimeMs;
+        offset = (offset + 1) % 60;
+        ImGui::PlotLines("Latency", history, 60, offset, nullptr, 0.0f, 33.3f, ImVec2(0, 50));
+
+        ImGui::End();
+        // ---------------------------------------------------------
+
+        // 4. End ImGui Frame (Generates render data)
+        userInterface_->endFrame();
+
+        // 5. Draw the Frame
+        // This will now call recordCommands which includes userInterface_->recordCommands
         drawFrame();
     }
 
-    // Wait for GPU to finish before exiting to avoid crashing during cleanup
+    // 6. Cleanup Preparation
+    // Ensure GPU is idle before the loop ends and destructors start firing
     vkDeviceWaitIdle(vulkanContext_->getDevice());
 }
 
@@ -97,7 +136,7 @@ void App::drawFrame() {
     // We check the flag here, or inside renderer_->drawFrame()
     // For a Senior architecture, the Renderer should report if it needs a resize
     try {
-        renderer_->drawFrame(graphicsPipeline_->getPipeline(), framebufferResized_, camera);
+        renderer_->drawFrame(graphicsPipeline_->getPipeline(), framebufferResized_, camera, *userInterface_);
     } catch (const std::runtime_error &e) {
         // If the renderer encounters VK_ERROR_OUT_OF_DATE_KHR, it throws
         renderer_->recreateSwapChain();

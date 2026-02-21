@@ -1,10 +1,8 @@
-cmake_minimum_required(VERSION 3.24...3.31) # 4.1 not required unless you need it
-# Add this BEFORE project() to help older dependencies
+cmake_minimum_required(VERSION 3.24...3.31)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(defer_render)
 
 set(TARGET_NAME defer_render)
-
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -12,9 +10,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ------------------------------------------------------------
 # Packages
 # ------------------------------------------------------------
-# Use VULKAN_SDK environment variable if set
-
-#find_package(Vulkan REQUIRED)
 find_package(VulkanHeaders REQUIRED)
 find_package(VulkanLoader REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
@@ -23,12 +18,35 @@ find_package(glm CONFIG REQUIRED)
 find_package(glslang CONFIG REQUIRED)
 find_package(stb REQUIRED)
 find_package(tinyobjloader REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
+# ------------------------------------------------------------
+# ImGui Path Resolution (MUST be before add_executable)
+# ------------------------------------------------------------
+# Try to get the root package folder from Conan variables
+# 1. Get the path (which currently contains $<$<CONFIG:Debug>:...>)
+get_target_property(IMGUI_RAW_PATH imgui::imgui INTERFACE_INCLUDE_DIRECTORIES)
+
+# 2. Use Regex to extract the actual absolute path from the Generator Expression
+# This looks for the part starting with /home and ending before the closing '>'
+string(REGEX MATCH "/home[^>]+" IMGUI_STRIPPED_PATH "${IMGUI_RAW_PATH}")
+
+# 3. If regex fails, fallback to Conan's package folder variable
+if(NOT IMGUI_STRIPPED_PATH)
+    set(IMGUI_STRIPPED_PATH "${imgui_PACKAGE_FOLDER_RELEASE}")
+endif()
+
+# 4. Set our clean paths (removing /include from the end of the root path)
+get_filename_component(IMGUI_ROOT "${IMGUI_STRIPPED_PATH}" DIRECTORY)
+set(IMGUI_BACKEND_SRC_DIR "${IMGUI_ROOT}/res/bindings")
+
+message(STATUS "FIXED: ImGui Root: ${IMGUI_ROOT}")
+message(STATUS "FIXED: ImGui Backend Dir: ${IMGUI_BACKEND_SRC_DIR}")
 
 # ------------------------------------------------------------
 # Target
 # ------------------------------------------------------------
-add_executable(defer_render
+add_executable(${TARGET_NAME}
         src/main.cpp
         src/app/app.cpp
         src/app/app.hpp
@@ -53,30 +71,33 @@ add_executable(defer_render
         src/system/ModelSystem.hpp
         src/renderer/Camera.cpp
         src/renderer/Camera.hpp
+        src/renderer/UserInterface.cpp
+        src/renderer/UserInterface.hpp
+        # Now these variables are guaranteed to be populated
+        "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_glfw.cpp"
+        "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_vulkan.cpp"
 )
 
 # ------------------------------------------------------------
-# Includes
+# Includes & Definitions
 # ------------------------------------------------------------
-
-# Use target_compile_definitions instead of add_definitions for better scope control
-
-target_compile_definitions(defer_render PRIVATE
+target_compile_definitions(${TARGET_NAME} PUBLIC
         VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
         VULKAN_HPP_STORAGE_SHARED=1
         VULKAN_HPP_STORAGE_SHARED_EXPORT=1
-        GLM_ENABLE_EXPERIMENTAL                # <--- fix GTX
+        GLM_ENABLE_EXPERIMENTAL
+        IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
 )
-# Fix the include priority: Put Vulkan SDK FIRST
-target_include_directories(defer_render
-        PRIVATE
+
+target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        "${IMGUI_REAL_PATH}/include"
+        "${IMGUI_BACKEND_SRC_DIR}"
 )
 
 # ------------------------------------------------------------
 # Link libraries
 # ------------------------------------------------------------
-
 target_link_libraries(${TARGET_NAME}
         PRIVATE
         Vulkan::Loader
@@ -88,56 +109,44 @@ target_link_libraries(${TARGET_NAME}
         glslang::SPIRV
         stb::stb
         tinyobjloader::tinyobjloader
+        imgui::imgui
 )
 
-# copy assets, models, texture ...etc put this after add_executable(..)
-# This creates a virtual link from your build folder to your actual assets
+# ------------------------------------------------------------
+# Assets & Shaders
+# ------------------------------------------------------------
 if (UNIX)
     execute_process(COMMAND ln -sfn "${CMAKE_SOURCE_DIR}/assets" "${CMAKE_BINARY_DIR}")
 else ()
     file(COPY "${CMAKE_SOURCE_DIR}/assets" DESTINATION "${CMAKE_BINARY_DIR}")
 endif ()
 
-# Ensure build/shaders folder exists
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/shaders)
-
-# Find glslangValidator
 
 find_program(GLSLANG_VALIDATOR
         NAMES glslangValidator glslc
         HINTS
         "$ENV{VULKAN_SDK}/bin"
-        "$ENV{VULKAN_SDK}/x86_64/bin" # Standard Vulkan SDK layout
+        "$ENV{VULKAN_SDK}/x86_64/bin"
 )
-if (NOT GLSLANG_VALIDATOR)
-    message(FATAL_ERROR "glslangValidator not found! Make sure Vulkan SDK is installed.")
-endif ()
 
-# GLSL → SPV
-#
-#add_dependencies(defer_render Shaders)
-# ------------------------------------------------------------
-# Automatic Shader Compilation (GLSL → SPV)
-# ------------------------------------------------------------
+if (NOT GLSLANG_VALIDATOR)
+    message(FATAL_ERROR "glslangValidator not found!")
+endif ()
 
 set(SHADER_SOURCE_DIR "${CMAKE_SOURCE_DIR}/shaders")
 set(SHADER_BINARY_DIR "${CMAKE_BINARY_DIR}/shaders")
 
-# Collect all vertex and fragment shaders
 file(GLOB_RECURSE SHADER_SOURCES
         "${SHADER_SOURCE_DIR}/*.vert"
         "${SHADER_SOURCE_DIR}/*.frag"
-        "${SHADER_SOURCE_DIR}/*.glsl" # Added .glsl for your blinn-phong files
+        "${SHADER_SOURCE_DIR}/*.glsl"
 )
 
 set(SPIRV_BINARY_FILES "")
-
 foreach (SHADER_PATH ${SHADER_SOURCES})
-    # Get the relative path so we can mirror the folder structure in build/
     file(RELATIVE_PATH REL_PATH "${SHADER_SOURCE_DIR}" "${SHADER_PATH}")
     set(OUTPUT_SPV "${SHADER_BINARY_DIR}/${REL_PATH}.spv")
-
-    # Ensure the subfolder exists in the build directory
     get_filename_component(OUT_DIR ${OUTPUT_SPV} DIRECTORY)
     file(MAKE_DIRECTORY ${OUT_DIR})
 
@@ -147,12 +156,8 @@ foreach (SHADER_PATH ${SHADER_SOURCES})
             DEPENDS ${SHADER_PATH}
             COMMENT "Compiling ${REL_PATH} to SPIR-V"
     )
-
     list(APPEND SPIRV_BINARY_FILES ${OUTPUT_SPV})
 endforeach ()
 
-# Create the target that triggers the compilation
 add_custom_target(Shaders ALL DEPENDS ${SPIRV_BINARY_FILES})
-
-# Ensure the executable waits for shaders to be compiled
 add_dependencies(${TARGET_NAME} Shaders)

@@ -10,13 +10,14 @@
 
 #include <vk_mem_alloc.h>
 
+class UserInterface;
 // Forward declarations
 class RenderPass;
 class SwapChain;
 class VulkanContext;
 
 class Renderer {
-  public:
+public:
     Renderer(VulkanContext &context, SwapChain &swapChain, RenderPass &renderPass, GLFWwindow *window);
     ~Renderer();
 
@@ -28,19 +29,22 @@ class Renderer {
     void createDescriptorSetLayout();
 
     // Changed to vk::Pipeline for C++ style consistency
-    void drawFrame(vk::Pipeline pipeline, bool framebufferResized, const Camera &camera);
+    void drawFrame(vk::Pipeline pipeline, bool framebufferResized,
+        const Camera &camera, UserInterface &userInterface);
 
     void recreateSwapChain();
 
     [[nodiscard]] vk::DescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_; }
 
-  private:
+private:
     void createCommandPool();
     void createCommandBuffers();
     void createSyncObjects();
 
     // Updated to use vk:: types
-    void recordCommandBuffer(vk::CommandBuffer commandBuffer, vk::Pipeline pipeline, uint32_t imageIndex) const;
+    void recordCommandBuffer(vk::CommandBuffer commandBuffer,
+        vk::Pipeline pipeline, uint32_t imageIndex,
+         UserInterface &userInterface) const;
 
     void createVertexBuffer();
     void createIndexBuffer();
@@ -57,8 +61,8 @@ class Renderer {
     void createDescriptorPool();
     void createDescriptorSets();
     void transitionImageLayout(vk::CommandBuffer cmd, vk::Image image,
-                                     vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
-                                     vk::ImageAspectFlags aspectMask) const;
+                               vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+                               vk::ImageAspectFlags aspectMask) const;
 
 
     // --- Members ---

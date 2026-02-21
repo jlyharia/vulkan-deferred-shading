@@ -29,7 +29,7 @@ Step
    echo "tools.system.package_manager:mode = install" >> $(conan config home)/global.conf
    echo "tools.system.package_manager:sudo = True" >> $(conan config home)/global.conf
    ```
-6. conan build command `conan install . --build=missing`
+6. conan build command `conan install . --output-folder=build --build=missing`
 
 ## Todo
 1. Delete vulkan resources per frame.
@@ -37,10 +37,19 @@ Step
 3. Show frame rate on screen UI.
    Summary of Priority
 
-   ~~Refactor to Dynamic Rendering: Clean up the Vulkan boilerplate first.~~
+~~Refactor to Dynamic Rendering: Clean up the Vulkan boilerplate first.~~
+ImGui Setup (High Priority): *
+move to gltf
+Here is the recommended order: PBR → Shadow Mapping → Deferred Shading.
 
-   Implement G-Buffer: Create the textures and the "Geometry" shaders.
+Implement G-Buffer: Create the textures and the "Geometry" shaders.
 
-   Lighting Pass: Create the "Second Pass" that reads those textures.
+Lighting Pass: Create the "Second Pass" that reads those textures.
 
-   Abstraction: Wrap these into classes like Shader, Buffer, and Texture to make the engine "Professional."
+Abstraction: Wrap these into classes like Shader, Buffer, and Texture to make the engine "Professional."
+
+# What I have done
+1. Vulkan 1.3
+2. Dynamic Rendering
+3. ImGui
+3. Gltf

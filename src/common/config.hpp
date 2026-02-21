@@ -5,9 +5,15 @@
 #pragma once
 
 namespace engineConfig {
-    // We use 'inline' so it can be included in multiple files without linker errors
-    inline constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+// We use 'inline' so it can be included in multiple files without linker errors
+inline constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
-    // You can also put other engine-wide settings here later
-    inline constexpr bool ENABLE_VALIDATION_LAYERS = true;
+// You can also put other engine-wide settings here later
+inline constexpr bool ENABLE_VALIDATION_LAYERS = true;
+
+inline constexpr int MAIN_WINDOW_HEIGHT = 2160;
+inline constexpr int MAIN_WINDOW_WIDTH = 3840;
+
+inline constexpr float DEFAULT_GUI_FONT = 3.0f;
+
 }

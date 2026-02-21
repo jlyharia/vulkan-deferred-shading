@@ -27,7 +27,7 @@ public:
 
     // Camera Constants
     float movementSpeed = 2.5f;
-    float mouseSensitivity = 0.02f;
+    float mouseSensitivity = 0.3f;
     float fov = 45.0f;
 
     Camera(glm::vec3 startPosition = glm::vec3(-2.0f, -2.0f, 2.0f),

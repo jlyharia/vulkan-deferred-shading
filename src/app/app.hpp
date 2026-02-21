@@ -10,13 +10,14 @@
 #include "renderer/Camera.hpp"
 #include "vulkan/VulkanContext.hpp"
 
+class UserInterface;
 class Renderer;
 class RenderPass;
 class GraphicsPipeline;
 class SwapChain;
 
 class App {
-  public:
+public:
     App(int width, int height, const char *title);
 
     // ============================================================
@@ -64,33 +65,25 @@ class App {
 
     void run();
 
-  private:
+private:
     // Basic Data
     int width_;
     int height_;
     const char *title_;
     Camera camera;
 
-    // 1. GLFW Window (Destroyed LAST)
+    // 1. Foundation: Declare FIRST, destroyed LAST
     GLFWwindow *window_ = nullptr;
-
-    // 2. Vulkan Context / Device (Destroyed 2nd to last)
     std::unique_ptr<VulkanContext> vulkanContext_;
 
-    // 3. Render Pass (The "Contract")
-    // Needs to be declared BEFORE the pipeline and swapchain/framebuffers
+    // 2. Resources: Depends on Context
     std::unique_ptr<RenderPass> renderPass_;
-    ;
-
-    // 4. Swapchain (Owns Images/Views/Framebuffers)
     std::unique_ptr<SwapChain> swapchain_;
-
-    // 5. Pipeline (Destroyed FIRST)
-    // Depends on the Render Pass
-
     std::unique_ptr<GraphicsPipeline> graphicsPipeline_;
-    std::unique_ptr<Renderer> renderer_;
 
+    // 3. Workers: Depends on everything above. Declare LAST, destroyed FIRST
+    std::unique_ptr<Renderer> renderer_;
+    std::unique_ptr<UserInterface> userInterface_;
     void initWindow();
 
     void mainLoop();
