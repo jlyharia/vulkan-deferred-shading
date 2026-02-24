@@ -10,8 +10,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ------------------------------------------------------------
 # Packages
 # ------------------------------------------------------------
+find_package(volk REQUIRED)
 find_package(VulkanHeaders REQUIRED)
-find_package(VulkanLoader REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -73,6 +73,7 @@ add_executable(${TARGET_NAME}
         src/renderer/Camera.hpp
         src/renderer/UserInterface.cpp
         src/renderer/UserInterface.hpp
+        src/common/VulkanInclude.hpp
         # Now these variables are guaranteed to be populated
         "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_glfw.cpp"
         "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_vulkan.cpp"
@@ -86,11 +87,13 @@ target_compile_definitions(${TARGET_NAME} PUBLIC
         VULKAN_HPP_STORAGE_SHARED=1
         VULKAN_HPP_STORAGE_SHARED_EXPORT=1
         GLM_ENABLE_EXPERIMENTAL
-        IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
+        IMGUI_IMPL_VULKAN_NO_PROTOTYPES
+#        IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+#        ${CMAKE_CURRENT_SOURCE_DIR}/src
         "${IMGUI_REAL_PATH}/include"
         "${IMGUI_BACKEND_SRC_DIR}"
 )
@@ -100,7 +103,7 @@ target_include_directories(${TARGET_NAME} PRIVATE
 # ------------------------------------------------------------
 target_link_libraries(${TARGET_NAME}
         PRIVATE
-        Vulkan::Loader
+        volk::volk
         vulkan-headers::vulkan-headers
         GPUOpen::VulkanMemoryAllocator
         glfw

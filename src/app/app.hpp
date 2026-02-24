@@ -3,7 +3,7 @@
 //
 
 #pragma once
-#include <GLFW/glfw3.h>
+#include "common/VulkanInclude.hpp"
 #include <chrono>
 #include <memory>
 

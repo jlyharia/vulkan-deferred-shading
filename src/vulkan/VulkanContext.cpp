@@ -1,6 +1,9 @@
 #include "VulkanContext.hpp"
+#include "common/VulkanInclude.hpp"
 #include "Validation.hpp"
 #include "swap_chain.hpp"
+#include "common/config.hpp"
+
 #include <iostream>
 #include <map>
 #include <set>
@@ -12,19 +15,47 @@ const std::vector<const char *> VulkanContext::deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
+// VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
+//     : window_(window), validation_(std::make_unique<Validation>(enableValidation)) {
+//
+//     // 1. Initialize global dispatcher with the base loader
+//     VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
+//
+//     if (validation_->isEnabled() && !validation_->checkLayerSupport()) {
+//         throw std::runtime_error("Validation layers requested, but not available!");
+//     }
+//
+//     createInstance();
+//
+//     // 2. Patch global dispatcher with Instance pointers
+//     VULKAN_HPP_DEFAULT_DISPATCHER.init(instance_);
+//
+//     if (validation_->isEnabled()) {
+//         setupDebugMessenger();
+//     }
+//
+//     createSurface();
+//     pickPhysicalDevice();
+//     createLogicalDevice();
+//     initVmaAllocator();
+// }
+
 VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
     : window_(window), validation_(std::make_unique<Validation>(enableValidation)) {
 
-    // 1. Initialize global dispatcher with the base loader
+    // --- STEP 1: INITIALIZE VOLK ---
+    if (volkInitialize() != VK_SUCCESS) {
+        throw std::runtime_error("Failed to initialize volk!");
+    }
     VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
-
     if (validation_->isEnabled() && !validation_->checkLayerSupport()) {
         throw std::runtime_error("Validation layers requested, but not available!");
     }
 
     createInstance();
 
-    // 2. Patch global dispatcher with Instance pointers
+    // --- STEP 2: LOAD INSTANCE FOR VOLK & DISPATCHER ---
+    volkLoadInstance(instance_);
     VULKAN_HPP_DEFAULT_DISPATCHER.init(instance_);
 
     if (validation_->isEnabled()) {
@@ -35,6 +66,7 @@ VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
     pickPhysicalDevice();
     createLogicalDevice();
     initVmaAllocator();
+    std::cerr<< "[Constructor] VulkanContext initialized successfully." << std::endl;
 }
 
 VulkanContext::~VulkanContext() {
@@ -178,6 +210,10 @@ void VulkanContext::createLogicalDevice() {
 
     vkDevice_ = physicalDevice_.createDevice(createInfo);
 
+    //  Volk dispatcher
+    volkLoadDevice(vkDevice_);
+    // -- Volk dispatcher
+
     // 3. Final Patch: Initialize global dispatcher with Device pointers for speed
     VULKAN_HPP_DEFAULT_DISPATCHER.init(vkDevice_);
 
@@ -297,7 +333,7 @@ void VulkanContext::initVmaAllocator() {
     vulkanFunctions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
 
     VmaAllocatorCreateInfo allocatorInfo{};
-    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    allocatorInfo.vulkanApiVersion = engineConfig::DEFAULT_VK_API_VERSION;
     allocatorInfo.instance = instance_;
     allocatorInfo.physicalDevice = physicalDevice_;
     allocatorInfo.device = vkDevice_;

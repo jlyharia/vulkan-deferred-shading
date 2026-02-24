@@ -471,7 +471,7 @@ void Renderer::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::Device
 
 void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera) const {
     UniformBufferObject ubo{};
-    ubo.model = glm::mat4(1.0f);
+    ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(10.0f, 10.0f, -5.0f));
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
 

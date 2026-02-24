@@ -3,8 +3,7 @@
 //
 
 #pragma once
-#include <GLFW/glfw3.h>
-#include <vulkan/vulkan.hpp>
+#include "common/VulkanInclude.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 class SwapChain;

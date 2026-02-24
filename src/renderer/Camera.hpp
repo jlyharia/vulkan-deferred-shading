@@ -30,8 +30,8 @@ public:
     float mouseSensitivity = 0.3f;
     float fov = 45.0f;
 
-    Camera(glm::vec3 startPosition = glm::vec3(-2.0f, -2.0f, 2.0f),
-           float startYaw = 45.0f, float startPitch = -30.0f)
+    Camera(glm::vec3 startPosition = glm::vec3(0.0f, 0.0f, 0.0f),
+           float startYaw = 45.0f, float startPitch = -10.0f)
         : position(startPosition), yaw(startYaw), pitch(startPitch) {
         updateCameraVectors();
     }

@@ -1,14 +1,11 @@
 #pragma once
 
-#include <GLFW/glfw3.h>
+#include "common/VulkanInclude.hpp"
 #include <string>
 #include <vector>
-#include <vulkan/vulkan.hpp>
 
 #include "Camera.hpp"
 #include "system/ModelSystem.hpp"
-
-#include <vk_mem_alloc.h>
 
 class UserInterface;
 // Forward declarations

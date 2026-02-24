@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <iostream>
 #include <limits>
-#include <vk_mem_alloc.h>
 
 namespace {
 
