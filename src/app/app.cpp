@@ -2,9 +2,6 @@
 // Created by johnny on 12/21/25.
 //
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-
 #include "app.hpp"
 
 #include <stdexcept>

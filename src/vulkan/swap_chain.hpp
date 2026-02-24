@@ -2,10 +2,9 @@
 // Created by johnny on 12/25/25.
 //
 #pragma once
-#include <GLFW/glfw3.h>
+
+#include "common/VulkanInclude.hpp"
 #include <vector>
-#include <vk_mem_alloc.h>
-#include <vulkan/vulkan.hpp>
 
 class VulkanContext;
 

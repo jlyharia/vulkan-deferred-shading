@@ -3,8 +3,8 @@
 //
 #pragma once
 
+#include "common/VulkanInclude.hpp"
 #include <vector>
-#include <vulkan/vulkan.hpp>
 
 class SwapChain;
 class VulkanContext;

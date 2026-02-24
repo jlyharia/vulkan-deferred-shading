@@ -3,15 +3,9 @@
 //
 
 #pragma once
-#include <vk_mem_alloc.h>
 
-#ifndef VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
-#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
-#endif
+#include "common/VulkanInclude.hpp"
 
-#include <vulkan/vulkan.hpp>
-
-#include <GLFW/glfw3.h>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -83,6 +77,7 @@ public:
                                    vk::ImageTiling tiling,
                                    vk::FormatFeatureFlags features) const;
     VmaAllocator getVmaAllocator() const { return vmaAllocator_; }
+
 private:
     GLFWwindow *window_;
 

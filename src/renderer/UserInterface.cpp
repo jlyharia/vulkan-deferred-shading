@@ -5,11 +5,6 @@
 
 #include <iostream>
 
-// Ensure the backend knows we are using Vulkan 1.3 Dynamic Rendering
-#ifndef IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
-#define IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
-#endif
-
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
@@ -24,8 +19,8 @@ UserInterface::UserInterface(VulkanContext &context, SwapChain &swapChain, GLFWw
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
     io.FontGlobalScale = engineConfig::DEFAULT_GUI_FONT;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     // Optional: Enable Multi-Viewport (Allows windows to float outside the main window)
@@ -33,6 +28,18 @@ UserInterface::UserInterface(VulkanContext &context, SwapChain &swapChain, GLFWw
     // 2. Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForVulkan(window, true);
 
+    // --- 重要：載入動態渲染函式指標 (針對 Volk/Dynamic Loader) ---
+    // 這一步必須在 ImGui_ImplVulkan_Init 之前執行，否則會 Segfault
+#ifndef IMGUI_IMPL_VULKAN_USE_LOADER
+    // 1.92.5 的參數順序：(apiVersion, loaderFunc, userData)
+    ImGui_ImplVulkan_LoadFunctions(
+        engineConfig::DEFAULT_VK_API_VERSION,
+        [](const char *function_name, void *user_data) {
+            return vkGetInstanceProcAddr(static_cast<VkInstance>(user_data), function_name);
+        },
+        (void *)context_.getInstance()
+        );
+#endif
     // --- START OF RENDERING INFO SETUP ---
     auto colorFormat = static_cast<VkFormat>(swapChain_.getColorFormat());
 
@@ -59,7 +66,9 @@ UserInterface::UserInterface(VulkanContext &context, SwapChain &swapChain, GLFWw
     init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo = renderingInfo;
 
-    ImGui_ImplVulkan_Init(&init_info);
+    if (!ImGui_ImplVulkan_Init(&init_info)) {
+        throw std::runtime_error("Failed to initialize ImGui!");
+    }
 
     // 3. Upload Fonts (Required for 1.92.x)
     // NO NEED to call ImGui_ImplVulkan_CreateFontsTexture() here anymore!

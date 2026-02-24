@@ -16,4 +16,6 @@ inline constexpr int MAIN_WINDOW_WIDTH = 3840;
 
 inline constexpr float DEFAULT_GUI_FONT = 3.0f;
 
+inline constexpr uint32_t DEFAULT_VK_API_VERSION = VK_API_VERSION_1_3;
+
 }
