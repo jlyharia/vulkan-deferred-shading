@@ -10,7 +10,7 @@ struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
     glm::vec3 normal;
-    glm::vec2 texCoord;
+    glm::vec2 uv; // tex Coord
 
     // Helper function to tell Vulkan how to read this struct
     static vk::VertexInputBindingDescription getBindingDescription() {
@@ -50,7 +50,7 @@ struct Vertex {
             3,
             0,
             vk::Format::eR32G32Sfloat,
-            offsetof(Vertex, texCoord)
+            offsetof(Vertex, uv)
             );
 
         return attributeDescriptions;
@@ -60,22 +60,22 @@ struct Vertex {
         return pos == other.pos &&
                color == other.color &&
                normal == other.normal &&
-               texCoord == other.texCoord;
+               uv == other.uv;
     }
 };
 
 namespace std {
 template <> struct hash<Vertex> {
-    size_t operator()(Vertex const &vertex) const {
+    size_t operator()(Vertex const &vertex) const noexcept {
         // Using bit-shifting and XOR to combine hashes of vertex components
         return ((hash<glm::vec3>()(vertex.pos) ^
                  (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
-               (hash<glm::vec2>()(vertex.texCoord) << 1) ^
+               (hash<glm::vec2>()(vertex.uv) << 1) ^
                (hash<glm::vec3>()(vertex.normal) << 1);
     }
 };
 } // namespace std
 
 // Sample data containers
-inline std::vector<Vertex> vertices;
-inline std::vector<uint32_t> indices;
+// inline std::vector<Vertex> vertices;
+// inline std::vector<uint32_t> indices;

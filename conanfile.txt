@@ -8,6 +8,7 @@ glm/1.0.1
 glslang/1.4.313.0
 stb/cci.20240531        # Provides stb_image.h, stb_image_write.h, etc.
 tinyobjloader/2.0.0-rc10 # Most common version for modern projects
+tinygltf/2.9.7
 imgui/1.92.5-docking
 
 

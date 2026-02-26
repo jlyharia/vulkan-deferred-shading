@@ -77,7 +77,10 @@ void App::initVulkan() {
     userInterface_ = std::make_unique<UserInterface>(*vulkanContext_, *swapchain_, window_);
     // 4. Initialize Renderer Resources (The Data)
     // Pass the pipeline layout so the Renderer knows how to bind sets
-    renderer_->initResources(graphicsPipeline_->getPipelineLayout(), "assets/model/sphere_grid.obj");
+    renderer_->initResources(graphicsPipeline_->getPipelineLayout(),
+                             // "assets/model/sphere_grid.obj"
+                             "assets/model/sphere.glb"
+        );
 }
 
 void App::mainLoop() {

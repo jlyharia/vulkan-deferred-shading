@@ -7,7 +7,7 @@
 #include <chrono>
 #include <memory>
 
-#include "renderer/Camera.hpp"
+#include "../scene/Camera.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 class UserInterface;
