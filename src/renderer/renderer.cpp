@@ -9,10 +9,11 @@
 #include <chrono>
 #include <cstring>
 
-#include "Uniform.hpp"
+#include "../common/Uniform.hpp"
 #include "UserInterface.hpp"
-#include "Vertex.hpp"
+#include "../common/Vertex.hpp"
 #include "common/config.hpp"
+#include "../scene/Model.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/render_pass.hpp"
 #include "vulkan/swap_chain.hpp"
@@ -73,23 +74,6 @@ Renderer::~Renderer() {
         }
     }
 
-    // This replaces BOTH vkDestroyBuffer and vkFreeMemory
-    if (vertexBuffer_ != VK_NULL_HANDLE) {
-        // This frees BOTH the buffer and the memory allocation
-        vmaDestroyBuffer(context_.getVmaAllocator(), vertexBuffer_, vertexBufferAllocation_);
-        // Safety: set to null so you don't accidentally try to use it again
-        vertexBuffer_ = VK_NULL_HANDLE;
-        vertexBufferAllocation_ = nullptr;
-    }
-
-    if (indexBuffer_ != VK_NULL_HANDLE) {
-        // This frees BOTH the buffer and the memory allocation
-        vmaDestroyBuffer(context_.getVmaAllocator(), indexBuffer_, indexBufferAllocation_);
-        // Safety: set to null so you don't accidentally try to use it again
-        indexBuffer_ = VK_NULL_HANDLE;
-        indexBufferAllocation_ = nullptr;
-    }
-
     // 2. Destroy Fences (Per Frame Slot)
     for (const auto &fence : inFlightFences_) {
         vkDestroyFence(context_.getDevice(), fence, nullptr);
@@ -114,11 +98,21 @@ void Renderer::initResources(vk::PipelineLayout pipelineLayout, std::string mode
     activePipelineLayout_ = pipelineLayout;
 
     // Load model using your system
-    ms.loadObjModel(modelPath);
+    // ms.loadObjModel(modelPath);
 
+    // 1. Create the model instance
+    model_ = std::make_unique<Model>(context_.getVmaAllocator());
+
+    // 2. Load and Upload (The class handles the logic)
+    model_->loadFromFile(modelPath);
+    model_->uploadToGPU(context_.getDevice(), context_.getGraphicsQueue(), commandPool_);
+
+    if (model_->getVertexBuffer() == VK_NULL_HANDLE) {
+        std::cerr << "Model loaded, but Vertex Buffer is STILL NULL!" << std::endl;
+    }
     // Create resources using the helper we just built
-    createVertexBuffer();
-    createIndexBuffer();
+    // createVertexBuffer();
+    // createIndexBuffer();
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
@@ -201,15 +195,18 @@ void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer,
         commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f));
         commandBuffer.setScissor(0, vk::Rect2D({0, 0}, extent));
 
-        commandBuffer.bindVertexBuffers(0, {vertexBuffer_}, {0});
-        commandBuffer.bindIndexBuffer(indexBuffer_, 0, vk::IndexType::eUint32);
+        // commandBuffer.bindVertexBuffers(0, {vertexBuffer_}, {0});
+        // commandBuffer.bindIndexBuffer(indexBuffer_, 0, vk::IndexType::eUint32);
+        commandBuffer.bindVertexBuffers(0, {model_->getVertexBuffer()}, {0});
+        commandBuffer.bindIndexBuffer(model_->getIndexBuffer(), 0, vk::IndexType::eUint32);
         commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, activePipelineLayout_, 0,
                                          {descriptorSets_[currentFrame]}, {});
 
         int shadingMode = 1;
         commandBuffer.pushConstants<int>(activePipelineLayout_, vk::ShaderStageFlagBits::eFragment, 0, shadingMode);
 
-        commandBuffer.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        // commandBuffer.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        commandBuffer.drawIndexed(model_->getIndexCount(), 1, 0, 0, 0);
     }
     commandBuffer.endRendering();
 
@@ -356,52 +353,6 @@ void Renderer::recreateSwapChain() {
     // we do NOT need to recreate the Pipeline!
 }
 
-void Renderer::createVertexBuffer() {
-    // auto& vertices = ms .getVertices();
-    vk::DeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
-
-    // 1. Create Staging Buffer (CPU Visible)
-    vk::Buffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    createBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer,
-                 stagingAlloc);
-
-    // 2. Map and Copy
-    void *data;
-    vmaMapMemory(context_.getVmaAllocator(), stagingAlloc, &data);
-    memcpy(data, vertices.data(), (size_t)bufferSize);
-    vmaUnmapMemory(context_.getVmaAllocator(), stagingAlloc);
-
-    // 3. Create GPU Local Buffer
-    createBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
-                 VMA_MEMORY_USAGE_GPU_ONLY, vertexBuffer_, vertexBufferAllocation_);
-
-    // 4. Copy to GPU
-    copyBuffer(stagingBuffer, vertexBuffer_, bufferSize);
-
-    // 5. Cleanup Staging
-    vmaDestroyBuffer(context_.getVmaAllocator(), stagingBuffer, stagingAlloc);
-}
-
-void Renderer::createIndexBuffer() {
-    vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
-
-    vk::Buffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    createBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer,
-                 stagingAlloc);
-
-    void *data;
-    vmaMapMemory(context_.getVmaAllocator(), stagingAlloc, &data);
-    memcpy(data, indices.data(), (size_t)bufferSize);
-    vmaUnmapMemory(context_.getVmaAllocator(), stagingAlloc);
-
-    createBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
-                 VMA_MEMORY_USAGE_GPU_ONLY, indexBuffer_, indexBufferAllocation_);
-
-    copyBuffer(stagingBuffer, indexBuffer_, bufferSize);
-    vmaDestroyBuffer(context_.getVmaAllocator(), stagingBuffer, stagingAlloc);
-}
 
 void Renderer::createUniformBuffers() {
     vk::DeviceSize bufferSize = sizeof(UniformBufferObject);

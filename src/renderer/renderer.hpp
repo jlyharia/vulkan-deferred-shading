@@ -4,9 +4,11 @@
 #include <string>
 #include <vector>
 
-#include "Camera.hpp"
-#include "system/ModelSystem.hpp"
+#include "../scene/Camera.hpp"
 
+#include <memory>
+
+class Model;
 class UserInterface;
 // Forward declarations
 class RenderPass;
@@ -81,15 +83,6 @@ private:
 
     uint32_t currentFrame = 0;
 
-    // // Memory Resources (VMA + vk::Buffer)
-    // VmaAllocator vmaAllocator = nullptr;
-
-    vk::Buffer vertexBuffer_;
-    VmaAllocation vertexBufferAllocation_ = nullptr;
-
-    vk::Buffer indexBuffer_;
-    VmaAllocation indexBufferAllocation_ = nullptr;
-
     // Uniform Resources
     std::vector<vk::Buffer> uniformBuffers_;
     std::vector<VmaAllocation> uniformBuffersAllocation_;
@@ -100,5 +93,6 @@ private:
     std::vector<vk::DescriptorSet> descriptorSets_;
     vk::DescriptorSetLayout descriptorSetLayout_;
 
-    ModelSystem ms;
+    // ModelSystem ms;
+    std::unique_ptr<Model> model_;
 };

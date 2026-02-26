@@ -19,6 +19,7 @@ find_package(glslang CONFIG REQUIRED)
 find_package(stb REQUIRED)
 find_package(tinyobjloader REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(TinyGLTF REQUIRED)
 
 # ------------------------------------------------------------
 # ImGui Path Resolution (MUST be before add_executable)
@@ -63,20 +64,22 @@ add_executable(${TARGET_NAME}
         src/renderer/renderer.cpp
         src/renderer/renderer.hpp
         src/common/config.hpp
-        src/renderer/Vertex.hpp
+        src/common/Vertex.hpp
         src/external/vma_impl.cpp
-        src/renderer/Uniform.hpp
+        src/common/Uniform.hpp
         src/external/vendor_impl.cpp
-        src/system/ModelSystem.cpp
-        src/system/ModelSystem.hpp
-        src/renderer/Camera.cpp
-        src/renderer/Camera.hpp
+        src/scene/Camera.hpp
         src/renderer/UserInterface.cpp
         src/renderer/UserInterface.hpp
         src/common/VulkanInclude.hpp
         # Now these variables are guaranteed to be populated
         "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_glfw.cpp"
         "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_vulkan.cpp"
+        src/system/GltfLoader.cpp
+        src/system/GltfLoader.hpp
+        src/scene/Model.cpp
+        src/scene/Model.hpp
+        src/vulkan/VulkanUtils.hpp
 )
 
 # ------------------------------------------------------------
@@ -113,6 +116,7 @@ target_link_libraries(${TARGET_NAME}
         stb::stb
         tinyobjloader::tinyobjloader
         imgui::imgui
+        TinyGLTF::TinyGLTF
 )
 
 # ------------------------------------------------------------

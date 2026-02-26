@@ -1,6 +1,6 @@
 #include "graphics_pipeline.hpp"
 #include "VulkanContext.hpp"
-#include "renderer/Vertex.hpp"
+#include "../common/Vertex.hpp"
 #include "swap_chain.hpp"
 #include <fstream>
 #include <iostream>
