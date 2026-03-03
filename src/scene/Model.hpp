@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <filesystem>
 
 struct Vertex;
 
@@ -23,7 +24,7 @@ public:
     ~Model();
 
     // Public API for the Renderer
-    void loadFromFile(const std::string &filePath);
+    bool loadFromFile(const std::string &filePath);
     void uploadToGPU(vk::Device device, vk::Queue transferQueue, vk::CommandPool commandPool);
 
     // Getters so the Renderer can bind these to the Command Buffer
@@ -31,6 +32,14 @@ public:
     [[nodiscard]] vk::Buffer getIndexBuffer() const { return indexBuffer_.buffer; }
     // [[nodiscard]] uint32_t getIndexCount() const { return static_cast<uint32_t>(indices_.size()); }
     [[nodiscard]] uint32_t getIndexCount() const { return indexCount_; }
+
+    struct Submesh {
+        uint32_t firstIndex;
+        uint32_t indexCount;
+        int materialIndex;
+    };
+
+    [[nodiscard]] const std::vector<Submesh> &getSubmeshes() const { return submeshes_; }
 
 private:
     // Internal loaders
@@ -40,8 +49,11 @@ private:
         VmaAllocation allocation = nullptr;
     } vertexBuffer_, indexBuffer_;
 
-    void loadObj(const std::string &filePath);
-    void loadGltf(const std::string &filePath);
+
+    bool loadObj(const std::string &filePath);
+    // bool loadGltf(const std::string &filePath);
+    bool loadGltf(const std::string &filePath, bool isBinary);
+
     void createAndUploadBuffer(
         vk::Device device,
         vk::Queue queue,
@@ -55,6 +67,7 @@ private:
     // CPU Data: These replace the globals!
     std::vector<Vertex> vertices_;
     std::vector<uint32_t> indices_;
+    std::vector<Submesh> submeshes_;
     uint32_t indexCount_ = 0;
 
 };

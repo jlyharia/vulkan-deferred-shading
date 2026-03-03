@@ -8,6 +8,8 @@
 #include <memory>
 
 #include "../scene/Camera.hpp"
+#include "core/AssetManager.hpp"
+#include "scene/RenderObject.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 class UserInterface;
@@ -77,13 +79,15 @@ private:
     std::unique_ptr<VulkanContext> vulkanContext_;
 
     // 2. Resources: Depends on Context
-    std::unique_ptr<RenderPass> renderPass_;
     std::unique_ptr<SwapChain> swapchain_;
     std::unique_ptr<GraphicsPipeline> graphicsPipeline_;
 
     // 3. Workers: Depends on everything above. Declare LAST, destroyed FIRST
     std::unique_ptr<Renderer> renderer_;
     std::unique_ptr<UserInterface> userInterface_;
+    std::vector<RenderObject> renderObjects_;
+    std::unique_ptr<AssetManager> assetManager_;
+    std::shared_ptr<Model> sponzaModel_;
     void initWindow();
 
     void mainLoop();
@@ -97,9 +101,9 @@ private:
     static void framebufferResizeCallback(GLFWwindow *window, int width, int height);
 
     void updateFrameTime(); // Our new extracted function
-
+    void loadScene();
     // State variables for time tracking
-    std::chrono::high_resolution_clock::time_point lastTime = std::chrono::high_resolution_clock::now();
+    std::chrono::high_resolution_clock::time_point lastTime;
     float timer = 0.0f;
     float deltaTime = 0.0f;
 
@@ -107,5 +111,9 @@ private:
 
     std::chrono::time_point<std::chrono::high_resolution_clock> lastFrameTime;
 
+    void renderUI() const;
     void processInput();
+    void update(float dt);
+
+
 };

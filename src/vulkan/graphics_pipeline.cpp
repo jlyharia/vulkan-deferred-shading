@@ -136,7 +136,7 @@ vk::ShaderModule GraphicsPipeline::createShaderModule(const std::vector<char> &c
 void GraphicsPipeline::createPipelineLayout(vk::DescriptorSetLayout dsLayout) {
     // Push Constant for shading mode
     auto pushConstantRange =
-        vk::PushConstantRange().setStageFlags(vk::ShaderStageFlagBits::eFragment).setOffset(0).setSize(sizeof(int));
+        vk::PushConstantRange().setStageFlags(vk::ShaderStageFlagBits::eVertex).setOffset(0).setSize(sizeof(glm::mat4));
 
     auto pipelineLayoutInfo =
         vk::PipelineLayoutCreateInfo().setSetLayouts(dsLayout).setPushConstantRanges(pushConstantRange);

@@ -3,12 +3,16 @@
 //
 
 #pragma once
-#include <glm/fwd.hpp>
+#include <glm/glm.hpp>
 
-
-struct UniformBufferObject
-{
+struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
 };
+
+
+struct GlobalUBO {
+    alignas(16)glm::mat4 view;
+    alignas(16)glm::mat4 proj;
+}; // move glm::mat4 model to push constant

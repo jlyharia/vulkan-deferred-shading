@@ -4,13 +4,15 @@
 
 #include "Model.hpp"
 #include "system/GltfLoader.hpp"
-// #include "external/vendor_impl.cpp" // This includes the tinyobj implementation
 #include <tiny_obj_loader.h>
-#include <stb_image.h>
 #include <tiny_gltf.h>
 #include <unordered_map>
 #include "../vulkan/VulkanUtils.hpp"
+
+#include <fstream>
 #include <iostream>
+#include <algorithm> // Required for std::ranges::transform
+#include <cctype>    // Required for ::tolower
 
 Model::~Model() {
     // VMA is safe: it ignores null handles, but checking is cleaner
@@ -27,37 +29,96 @@ Model::~Model() {
     }
 }
 
-void Model::loadFromFile(const std::string &filePath) {
-    std::string ext = filePath.substr(filePath.find_last_of('.') + 1);
+bool Model::loadFromFile(const std::string &filePath) {
+    namespace fs = std::filesystem;
+    fs::path path(filePath);
 
-    if (ext == "obj") {
-        loadObj(filePath);
-    } else if (ext == "gltf" || ext == "glb") {
-        loadGltf(filePath);
-    } else {
-        throw std::runtime_error("Unsupported model format: " + ext);
+    // 1. Check if file exists
+    if (!fs::exists(path)) {
+        std::cerr << "[Model] File does not exist: " << filePath << std::endl;
+        return false;
     }
+
+    // 2. Extract extension and normalize to lowercase
+    std::string ext = path.extension().string();
+    // std::ranges::transform(ext, ext.begin(), ::tolower);
+    // 2. Modern C++20 Lowercase Transformation
+    std::ranges::transform(ext, ext.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    // 3. Handle OBJ directly
+    if (ext == ".obj") {
+        return loadObj(filePath);
+    }
+
+    // 4. Handle glTF / glb using Header Detection (Magic Number)
+    if (ext == ".gltf" || ext == ".glb") {
+        std::ifstream file(filePath, std::ios::binary);
+        if (!file)
+            return false;
+
+        char header[4];
+        file.read(header, 4);
+        file.close();
+
+        // "glTF" in ASCII is the magic number for binary .glb
+        bool isBinary = (std::strncmp(header, "glTF", 4) == 0);
+
+        return loadGltf(filePath, isBinary);
+    }
+
+    std::cerr << "[Model] Unsupported file extension: " << ext << std::endl;
+    return false;
 }
 
-void Model::loadGltf(const std::string &filePath) {
-    auto data = GltfLoader::loadFromFile(filePath);
-    // Move the data to avoid expensive copying of large vectors
+bool Model::loadGltf(const std::string &filePath, bool isBinary) {
+    // We pass the isBinary flag we detected in the header check
+    auto data = GltfLoader::loadFromFile(filePath, isBinary);
+
+    if (!data.success) {
+        return false;
+    }
+
+    // Clear old data for re-loading safety
+    vertices_.clear();
+    indices_.clear();
+    submeshes_.clear();
+
+    // Move data (Zero-copy)
     vertices_ = std::move(data.vertices);
     indices_ = std::move(data.indices);
     indexCount_ = static_cast<uint32_t>(indices_.size());
+
+    for (const auto &m : data.meshes) {
+        submeshes_.push_back({m.firstIndex, m.indexCount, m.materialIndex});
+    }
+
+    std::cout << "[Model] Loaded glTF: " << filePath << " (" << vertices_.size() << " verts)" << std::endl;
+    return true;
 }
 
-void Model::loadObj(const std::string &filePath) {
+bool Model::loadObj(const std::string &filePath) {
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
 
+    // 1. Attempt to load the file
     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filePath.c_str())) {
-        throw std::runtime_error("TinyOBJ Loader Error: " + warn + err);
+        std::cerr << "[TinyOBJ] Error: " << err << " (Warning: " << warn << ")" << std::endl;
+        return false; // Graceful failure
+    }
+
+    // Optional: Log warnings even if loading succeeded
+    if (!warn.empty()) {
+        std::cout << "[TinyOBJ] Warning: " << warn << std::endl;
     }
 
     std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+    // Clear existing data in case this is a re-load
+    vertices_.clear();
+    indices_.clear();
 
     for (const auto &shape : shapes) {
         for (const auto &index : shape.mesh.indices) {
@@ -84,7 +145,7 @@ void Model::loadObj(const std::string &filePath) {
                 };
             }
 
-            vertex.color = {1.0f, 1.0f, 1.0f}; // Default color
+            vertex.color = {1.0f, 1.0f, 1.0f};
 
             if (uniqueVertices.count(vertex) == 0) {
                 uniqueVertices[vertex] = static_cast<uint32_t>(vertices_.size());
@@ -93,10 +154,25 @@ void Model::loadObj(const std::string &filePath) {
             indices_.push_back(uniqueVertices[vertex]);
         }
     }
+
     indexCount_ = static_cast<uint32_t>(indices_.size());
+    submeshes_.push_back({0, static_cast<uint32_t>(indices_.size()), -1});
+
+    // 2. Final check: did we actually get any geometry?
+    if (vertices_.empty()) {
+        std::cerr << "[Model] Error: No geometry found in " << filePath << std::endl;
+        return false;
+    }
+
+    return true; // Success!
 }
 
 void Model::uploadToGPU(vk::Device device, vk::Queue queue, vk::CommandPool commandPool) {
+
+    if (vertices_.empty() || indices_.empty()) {
+        std::cerr << "[Model Error] Attempted to upload empty mesh data to GPU! Check loader." << std::endl;
+        return;
+    }
     // Vertex Buffer
     createAndUploadBuffer(device,
                           queue,

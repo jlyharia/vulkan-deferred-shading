@@ -8,8 +8,8 @@
 
 #include "renderer/renderer.hpp"
 #include "renderer/UserInterface.hpp"
+#include "scene/Model.hpp"
 #include "vulkan/graphics_pipeline.hpp"
-#include "vulkan/render_pass.hpp"
 #include "vulkan/swap_chain.hpp"
 
 #include <imgui.h>
@@ -21,10 +21,13 @@ App::~App() {
     // Wait for GPU to be idle before destroying anything
     if (vulkanContext_)
         vkDeviceWaitIdle(vulkanContext_->getDevice());
+
+    renderObjects_.clear(); // Releases references in the vector
+    sponzaModel_.reset(); // Releases the shared_ptr to the model
+    assetManager_.reset(); // If it holds any staging buffers
     userInterface_.reset();
     renderer_.reset(); // 5. Destroys sync objects/cmd buffers
     graphicsPipeline_.reset(); // 4. Destroys pipeline
-    renderPass_.reset(); // 3. Destroys render pass
     swapchain_.reset(); // 2. Destroys framebuffers/image views
     vulkanContext_.reset(); // 1. Finally, destroys Device and Instance
 
@@ -58,85 +61,124 @@ void App::framebufferResizeCallback(GLFWwindow *window, int width, int height) {
 void App::initVulkan() {
     vulkanContext_ = std::make_unique<VulkanContext>(window_, true);
     swapchain_ = std::make_unique<SwapChain>(*vulkanContext_, window_);
-    renderPass_ =
-        std::make_unique<RenderPass>(*vulkanContext_, swapchain_->getColorFormat(), swapchain_->getDepthFormat());
 
-    // --- NEW PROFESSIONAL SEQUENCE ---
+    // 1. Create Renderer first to get the Command Pool
+    renderer_ = std::make_unique<Renderer>(*vulkanContext_, *swapchain_, window_);
 
-    // 1. Create Renderer (Minimal state)
-    renderer_ = std::make_unique<Renderer>(*vulkanContext_, *swapchain_, *renderPass_, window_);
-
-    // 2. Create the Layout (The Blueprint)
     renderer_->createDescriptorSetLayout();
+    // 2. Create AssetManager using the pool from the renderer
+    assetManager_ = std::make_unique<AssetManager>(*vulkanContext_, renderer_->getCommandPool());
 
-    // 3. Create Pipeline (The Logic) - Pass the layout FROM the renderer
-    graphicsPipeline_ =
-        std::make_unique<GraphicsPipeline>(*vulkanContext_, *swapchain_,
-                                           renderer_->getDescriptorSetLayout() // <--- This is the key link
-            );
-    userInterface_ = std::make_unique<UserInterface>(*vulkanContext_, *swapchain_, window_);
-    // 4. Initialize Renderer Resources (The Data)
-    // Pass the pipeline layout so the Renderer knows how to bind sets
-    renderer_->initResources(graphicsPipeline_->getPipelineLayout(),
-                             // "assets/model/sphere_grid.obj"
-                             "assets/model/sphere.glb"
+    // 3. Create Pipeline using the Layout from the Renderer
+    graphicsPipeline_ = std::make_unique<GraphicsPipeline>(
+        *vulkanContext_, *swapchain_, renderer_->getDescriptorSetLayout()
         );
+
+    userInterface_ = std::make_unique<UserInterface>(*vulkanContext_, *swapchain_, window_);
+
+    // 4. Initialize Renderer internal buffers/sets with the Pipeline Layout
+    renderer_->initResources(graphicsPipeline_->getPipelineLayout());
+
+    // 5. Load your objects (calls assetManager->loadModel internally)
+    loadScene();
+}
+
+void App::loadScene() {
+    // 1. Load the Sponza Mesh (Geometry)
+    sponzaModel_ = std::make_shared<Model>(vulkanContext_->getVmaAllocator());
+    sponzaModel_->loadFromFile(
+        // "assets/model/basic/sphere.glb"
+        "assets/model/sponza/glTF/Sponza.gltf"
+        );
+
+    // Upload geometry to GPU memory
+    sponzaModel_->uploadToGPU(vulkanContext_->getDevice(), vulkanContext_->getGraphicsQueue(),
+                              renderer_->getCommandPool());
+
+    // 2. Create the RenderObject (The Instance)
+    RenderObject sponzaInstance;
+    sponzaInstance.model = sponzaModel_;
+    sponzaInstance.name = "Sponza_Main_Building";
+
+    // Sponza is often modeled in centimeters; you might need to scale it down
+    sponzaInstance.transform.setScale(glm::vec3(1.0f));
+    sponzaInstance.transform.setRotation(-90.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+    sponzaInstance.transform.updateMatrix();
+
+    // 3. Add to the render list
+    renderObjects_.push_back(sponzaInstance);
 }
 
 void App::mainLoop() {
+
+    // Initialize lastTime right before starting the loop to avoid a massive
+    // first-frame jump
+    lastTime = std::chrono::high_resolution_clock::now();
+
     while (!glfwWindowShouldClose(window_)) {
-        // 1. Handle Window Events
         glfwPollEvents();
 
-        // 2. Update Timing and Logic
+        // 1. Logic Phase
         updateFrameTime();
-        processInput();
+        processInput(); // Internally updates camera
+        update(deltaTime); // Internally updates all object matrices
 
-        // 3. Start ImGui Frame
-        // This must happen before any ImGui:: commands are called
+        // 2. UI Phase
         userInterface_->beginFrame();
-
-        // ---------------------------------------------------------
-        // UI DEFINITION SECTION
-        // ---------------------------------------------------------
-        // This creates an invisible "docking zone" over your whole window.
-        // Your other windows (Stats, Settings) can now be snapped to the edges.
-        ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_PassthruCentralNode;
-        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockspace_flags);
-        ImGui::Begin("Performance Monitor");
-
-        float frameTimeMs = deltaTime * 1000.0f;
-        ImGui::Text("Frame Time: %.3f ms", frameTimeMs);
-        ImGui::Text("FPS: %.1f", 1.0f / (deltaTime > 0.0f ? deltaTime : 0.001f));
-
-        // Simple visualizer for frame stability
-        static float history[60] = {0};
-        static int offset = 0;
-        history[offset] = frameTimeMs;
-        offset = (offset + 1) % 60;
-        ImGui::PlotLines("Latency", history, 60, offset, nullptr, 0.0f, 33.3f, ImVec2(0, 50));
-
-        ImGui::End();
-        // ---------------------------------------------------------
-
-        // 4. End ImGui Frame (Generates render data)
+        renderUI(); // Call our extracted function
         userInterface_->endFrame();
 
-        // 5. Draw the Frame
-        // This will now call recordCommands which includes userInterface_->recordCommands
+        // 3. Render Phase
         drawFrame();
     }
-
-    // 6. Cleanup Preparation
-    // Ensure GPU is idle before the loop ends and destructors start firing
     vkDeviceWaitIdle(vulkanContext_->getDevice());
+}
+
+void App::update(float dt) {
+    // 1. Process Input and Move Camera
+    // It's cleaner to handle camera input inside the update loop
+    // where 'dt' is already calculated.
+    // camera.handleInput(window_, dt);
+
+    // 3. Update all GameObjects (Sponza parts, etc.)
+    for (auto &obj : renderObjects_) {
+        obj.transform.updateMatrix();
+    }
+}
+
+void App::renderUI() const {
+    // ---------------------------------------------------------
+    // UI DEFINITION SECTION
+    // ---------------------------------------------------------
+    // This creates an invisible "docking zone" over your whole window.
+    // Your other windows (Stats, Settings) can now be snapped to the edges.
+    ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_PassthruCentralNode;
+    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockspace_flags);
+    ImGui::Begin("Performance Monitor");
+
+    float frameTimeMs = deltaTime * 1000.0f;
+    ImGui::Text("Frame Time: %.3f ms", frameTimeMs);
+    ImGui::Text("FPS: %.1f", 1.0f / (deltaTime > 0.0f ? deltaTime : 0.001f));
+
+    // Simple visualizer for frame stability
+    static float history[60] = {0};
+    static int offset = 0;
+    history[offset] = frameTimeMs;
+    offset = (offset + 1) % 60;
+    ImGui::PlotLines("Latency", history, 60, offset, nullptr, 0.0f, 33.3f, ImVec2(0, 50));
+
+    ImGui::End();
 }
 
 void App::drawFrame() {
     // We check the flag here, or inside renderer_->drawFrame()
     // For a Senior architecture, the Renderer should report if it needs a resize
     try {
-        renderer_->drawFrame(graphicsPipeline_->getPipeline(), framebufferResized_, camera, *userInterface_);
+        renderer_->drawFrame(graphicsPipeline_->getPipeline(),
+                             framebufferResized_,
+                             camera,
+                             *userInterface_,
+                             renderObjects_);
     } catch (const std::runtime_error &e) {
         // If the renderer encounters VK_ERROR_OUT_OF_DATE_KHR, it throws
         renderer_->recreateSwapChain();
@@ -177,12 +219,10 @@ void App::updateFrameTime() {
 }
 
 void App::processInput() {
-    // 1. Calculate DeltaTime
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float dt = std::chrono::duration<float>(currentTime - lastFrameTime).count();
-    lastFrameTime = currentTime;
     if (glfwGetKey(window_, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         glfwSetWindowShouldClose(window_, true);
     }
-    camera.handleInput(window_, dt);
+
+    // Use the passed in dt!
+    camera.handleInput(window_, deltaTime);
 }
