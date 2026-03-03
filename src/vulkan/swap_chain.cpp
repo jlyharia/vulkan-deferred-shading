@@ -182,43 +182,6 @@ vk::Format SwapChain::findDepthFormat() {
                vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment);
 }
 
-// void SwapChain::createImage(uint32_t width,
-//                             uint32_t height,
-//                             vk::Format format,
-//                             vk::ImageTiling tiling,
-//                             vk::ImageUsageFlags usage,
-//                             // vk::MemoryPropertyFlags properties,
-//                             VmaMemoryUsage vmaUsage,
-//                             vk::Image &image,
-//                             vk::DeviceMemory &imageMemory) const {
-//
-//     auto imageInfo = vk::ImageCreateInfo()
-//                      .setImageType(vk::ImageType::e2D)
-//                      .setExtent({width, height, 1})
-//                      .setMipLevels(1)
-//                      .setArrayLayers(1)
-//                      .setFormat(format)
-//                      .setTiling(tiling)
-//                      .setInitialLayout(vk::ImageLayout::eUndefined)
-//                      .setUsage(usage)
-//                      .setSamples(vk::SampleCountFlagBits::e1)
-//                      .setSharingMode(vk::SharingMode::eExclusive);
-//     VmaAllocationCreateInfo allocInfo = {};
-//     allocInfo.usage = vmaUsage;
-//
-//     // VMA handles create, allocate, and bind in one call
-//     VkImage rawImage;
-//     if (vmaCreateImage(context_.getVmaAllocator(),
-//                        reinterpret_cast<const VkImageCreateInfo*>(&imageInfo),
-//                        &allocInfo,
-//                        &rawImage,
-//                        &allocation,
-//                        nullptr) != VK_SUCCESS) {
-//         throw std::runtime_error("failed to create image with VMA!");
-//                        }
-//     image = rawImage;
-// }
-
 void SwapChain::createImage(uint32_t width,
                             uint32_t height,
                             vk::Format format,

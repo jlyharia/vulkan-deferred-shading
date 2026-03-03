@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "../scene/Camera.hpp"
+#include "scene/RenderObject.hpp"
+
 
 #include <memory>
 
@@ -17,23 +19,28 @@ class VulkanContext;
 
 class Renderer {
 public:
-    Renderer(VulkanContext &context, SwapChain &swapChain, RenderPass &renderPass, GLFWwindow *window);
+    Renderer(VulkanContext &context, SwapChain &swapChain, GLFWwindow *window);
     ~Renderer();
 
     // Disable copying
     Renderer(const Renderer &) = delete;
     Renderer &operator=(const Renderer &) = delete;
 
-    void initResources(vk::PipelineLayout pipelineLayout, std::string modelPath);
+    void initResources(vk::PipelineLayout pipelineLayout);
     void createDescriptorSetLayout();
 
     // Changed to vk::Pipeline for C++ style consistency
-    void drawFrame(vk::Pipeline pipeline, bool framebufferResized,
-        const Camera &camera, UserInterface &userInterface);
+    void drawFrame(vk::Pipeline pipeline,
+                   bool framebufferResized,
+                   const Camera &camera,
+                   UserInterface &userInterface,
+                   const std::vector<RenderObject> &renderObjects);
 
     void recreateSwapChain();
 
     [[nodiscard]] vk::DescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_; }
+
+    [[nodiscard]] vk::CommandPool getCommandPool() const { return commandPool_; }
 
 private:
     void createCommandPool();
@@ -41,12 +48,19 @@ private:
     void createSyncObjects();
 
     // Updated to use vk:: types
-    void recordCommandBuffer(vk::CommandBuffer commandBuffer,
-        vk::Pipeline pipeline, uint32_t imageIndex,
-         UserInterface &userInterface) const;
-
-    void createVertexBuffer();
-    void createIndexBuffer();
+    void recordCommandBuffer(vk::CommandBuffer cmd,
+                             vk::Pipeline pipeline,
+                             uint32_t imageIndex,
+                             const UserInterface &userInterface,
+                             const std::vector<RenderObject> &objects) const;
+    void renderScene(vk::CommandBuffer cmd,
+                     vk::Pipeline pipeline,
+                     uint32_t imageIndex,
+                     const std::vector<RenderObject> &objects) const;
+    vk::RenderingAttachmentInfo getPrimaryColorAttachment(uint32_t imageIndex) const;
+    vk::RenderingAttachmentInfo getPrimaryDepthAttachment() const;
+    void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
+    void finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
 
     // Your updated C++ style buffer helper
     void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage vmaUsage, vk::Buffer &buffer,
@@ -67,7 +81,6 @@ private:
     // --- Members ---
     VulkanContext &context_;
     SwapChain &swapChain_;
-    RenderPass &renderPass_;
     GLFWwindow *window_;
 
     // Core Vulkan Handles (C++ style)

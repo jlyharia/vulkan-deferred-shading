@@ -15,12 +15,13 @@
 #include "common/config.hpp"
 #include "../scene/Model.hpp"
 #include "vulkan/VulkanContext.hpp"
-#include "vulkan/render_pass.hpp"
 #include "vulkan/swap_chain.hpp"
+
+
 // The C++ Bindings Header
 
-Renderer::Renderer(VulkanContext &context, SwapChain &swapChain, RenderPass &renderPass, GLFWwindow *window_)
-    : context_(context), swapChain_(swapChain), renderPass_(renderPass), window_(window_) {
+Renderer::Renderer(VulkanContext &context, SwapChain &swapChain, GLFWwindow *window_)
+    : context_(context), swapChain_(swapChain), window_(window_) {
 
     // 2. Initialize Command Infrastructure
     createCommandPool();
@@ -94,29 +95,14 @@ Renderer::~Renderer() {
     }
 }
 
-void Renderer::initResources(vk::PipelineLayout pipelineLayout, std::string modelPath) {
+void Renderer::initResources(vk::PipelineLayout pipelineLayout) {
     activePipelineLayout_ = pipelineLayout;
 
-    // Load model using your system
-    // ms.loadObjModel(modelPath);
-
-    // 1. Create the model instance
-    model_ = std::make_unique<Model>(context_.getVmaAllocator());
-
-    // 2. Load and Upload (The class handles the logic)
-    model_->loadFromFile(modelPath);
-    model_->uploadToGPU(context_.getDevice(), context_.getGraphicsQueue(), commandPool_);
-
-    if (model_->getVertexBuffer() == VK_NULL_HANDLE) {
-        std::cerr << "Model loaded, but Vertex Buffer is STILL NULL!" << std::endl;
-    }
-    // Create resources using the helper we just built
-    // createVertexBuffer();
-    // createIndexBuffer();
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
 }
+
 
 void Renderer::createCommandPool() {
     auto queueFamilyIndices = context_.findQueueFamilies(context_.getPhysicalDevice());
@@ -140,91 +126,133 @@ void Renderer::createCommandBuffers() {
     commandBuffers_ = context_.getDevice().allocateCommandBuffers(allocInfo);
 }
 
-void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer,
-                                   vk::Pipeline pipeline,
-                                   uint32_t imageIndex,
-                                   UserInterface &userInterface) const {
+
+void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
+                                   const vk::Pipeline pipeline,
+                                   const uint32_t imageIndex,
+                                   const UserInterface &userInterface,
+                                   const std::vector<RenderObject> &objects) const {
+    // 1. Setup
     auto beginInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-    commandBuffer.begin(beginInfo);
+    cmd.begin(beginInfo);
+    {
+        // 2. Prepare Images (Transitions)
+        prepareFrameImages(cmd, imageIndex);
 
-    // 1. BARRIER: Replace "initialLayout = eUndefined" and "Dependency"
-    // This transitions the swapchain image so we can write to it.
-    transitionImageLayout(commandBuffer, swapChain_.getImages()[imageIndex],
-                          vk::ImageLayout::eUndefined,
-                          vk::ImageLayout::eColorAttachmentOptimal,
-                          vk::ImageAspectFlagBits::eColor);
+        // 3. Main Geometry Pass
+        renderScene(cmd, pipeline, imageIndex, objects);
 
-    // Transition Depth Image: Undefined -> DepthAttachment
-    // Use the getter we added to your SwapChain
-    transitionImageLayout(commandBuffer, swapChain_.getDepthImage(),
-                          vk::ImageLayout::eUndefined,
-                          vk::ImageLayout::eDepthStencilAttachmentOptimal,
-                          vk::ImageAspectFlagBits::eDepth);
-    // Note: If your depth image is reused, you might transition it here too.
-    // For now, let's assume it's already in DepthStencilAttachmentOptimal.
+        // 4. UI Pass (ImGui)
+        // Note: UserInterface handles its own begin/endRendering internally
+        userInterface.recordCommands(cmd, imageIndex);
 
-    // 2. COLOR ATTACHMENT (Based on your old AttachmentDescription)
+        // 5. Present Preparation
+        finalizeFrameImages(cmd, imageIndex);
+    }
+    cmd.end();
+}
+
+void Renderer::renderScene(vk::CommandBuffer cmd,
+                           vk::Pipeline pipeline,
+                           uint32_t imageIndex,
+                           const std::vector<RenderObject> &objects) const {
+
+    // Create attachment info using helpers to keep this clean
+    auto colorAttachment = getPrimaryColorAttachment(imageIndex);
+    auto depthAttachment = getPrimaryDepthAttachment();
+
+    vk::RenderingInfo renderingInfo{};
+    renderingInfo.setRenderArea({{0, 0}, swapChain_.getExtent()})
+                 .setLayerCount(1)
+                 .setColorAttachments(colorAttachment)
+                 .setPDepthAttachment(&depthAttachment);
+
+    cmd.beginRendering(renderingInfo);
+    {
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+
+        // Dynamic State
+        auto extent = swapChain_.getExtent();
+        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
+                                        static_cast<float>(extent.width),
+                                        static_cast<float>(extent.height),
+                                        0.0f, 1.0f));
+        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+
+        // Bind Global Uniforms (Camera View/Proj) - Done ONCE per frame
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                               activePipelineLayout_,
+                               0,
+                               {descriptorSets_[currentFrame]},
+                               {});
+
+        // --- THE OBJECT LOOP ---
+        for (const auto &[model, transform, name] : objects) {
+            if (!model)
+                continue;
+
+            // 1. Push the Model Matrix (Transform) to the Shader
+            cmd.pushConstants<glm::mat4>(
+                activePipelineLayout_,
+                vk::ShaderStageFlagBits::eVertex,
+                0,
+                transform.modelMatrix
+                );
+
+            // 2. Bind the Model's GPU Buffers
+            vk::DeviceSize offsets[] = {0};
+            cmd.bindVertexBuffers(0, {model->getVertexBuffer()}, offsets);
+            cmd.bindIndexBuffer(model->getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+            // 3. Draw each part (Submesh) of the model
+            for (const auto &submesh : model->getSubmeshes()) {
+                cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
+            }
+        }
+    }
+    cmd.endRendering();
+}
+
+vk::RenderingAttachmentInfo Renderer::getPrimaryColorAttachment(uint32_t imageIndex) const {
     vk::RenderingAttachmentInfo colorAttachment;
     colorAttachment.setImageView(swapChain_.getImageViews()[imageIndex])
                    .setImageLayout(vk::ImageLayout::eAttachmentOptimal)
                    .setLoadOp(vk::AttachmentLoadOp::eClear)
                    .setStoreOp(vk::AttachmentStoreOp::eStore)
-                   .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}));
+                   .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.02f, 0.02f, 0.02f, 1.0f}));
+    return colorAttachment;
+}
 
-    // 3. DEPTH ATTACHMENT (Based on your old AttachmentDescription)
+vk::RenderingAttachmentInfo Renderer::getPrimaryDepthAttachment() const {
     vk::RenderingAttachmentInfo depthAttachment;
-    depthAttachment.setImageView(swapChain_.getDepthImageView()) // Make sure you have a getter for this!
+    depthAttachment.setImageView(swapChain_.getDepthImageView())
                    .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
                    .setLoadOp(vk::AttachmentLoadOp::eClear)
-                   .setStoreOp(vk::AttachmentStoreOp::eDontCare) // Matching your old StoreOp
+                   .setStoreOp(vk::AttachmentStoreOp::eDontCare)
                    .setClearValue(vk::ClearDepthStencilValue(1.0f, 0));
+    return depthAttachment;
+}
 
-    // 4. BEGIN RENDERING (The Dynamic RenderPass)
-    vk::RenderingInfo renderingInfo;
-    renderingInfo.setRenderArea(vk::Rect2D({0, 0}, swapChain_.getExtent()))
-                 .setLayerCount(1)
-                 .setColorAttachments(colorAttachment)
-                 .setPDepthAttachment(&depthAttachment);
+void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {
+    // Transition Swapchain: Undefined -> ColorAttachment
+    transitionImageLayout(cmd, swapChain_.getImages()[imageIndex],
+                          vk::ImageLayout::eUndefined,
+                          vk::ImageLayout::eColorAttachmentOptimal,
+                          vk::ImageAspectFlagBits::eColor);
 
-    commandBuffer.beginRendering(renderingInfo);
-    {
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+    // Transition Depth: Undefined -> DepthAttachment
+    transitionImageLayout(cmd, swapChain_.getDepthImage(),
+                          vk::ImageLayout::eUndefined,
+                          vk::ImageLayout::eDepthStencilAttachmentOptimal,
+                          vk::ImageAspectFlagBits::eDepth);
+}
 
-        // Viewport and Scissor must be set because they are dynamic
-        auto extent = swapChain_.getExtent();
-        commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f));
-        commandBuffer.setScissor(0, vk::Rect2D({0, 0}, extent));
-
-        // commandBuffer.bindVertexBuffers(0, {vertexBuffer_}, {0});
-        // commandBuffer.bindIndexBuffer(indexBuffer_, 0, vk::IndexType::eUint32);
-        commandBuffer.bindVertexBuffers(0, {model_->getVertexBuffer()}, {0});
-        commandBuffer.bindIndexBuffer(model_->getIndexBuffer(), 0, vk::IndexType::eUint32);
-        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, activePipelineLayout_, 0,
-                                         {descriptorSets_[currentFrame]}, {});
-
-        int shadingMode = 1;
-        commandBuffer.pushConstants<int>(activePipelineLayout_, vk::ShaderStageFlagBits::eFragment, 0, shadingMode);
-
-        // commandBuffer.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-        commandBuffer.drawIndexed(model_->getIndexCount(), 1, 0, 0, 0);
-    }
-    commandBuffer.endRendering();
-
-    // --- NEW: UI STEP ---
-    // At this point, the image is still in eColorAttachmentOptimal.
-    // We call UserInterface::recordCommands here.
-    // Inside that function, it will start a NEW beginRendering/endRendering block.
-    userInterface.recordCommands(commandBuffer, imageIndex);
-    // --------------------
-
-    // 5. BARRIER: Replace "finalLayout = ePresentSrcKHR"
-    // Transition back to presentation layout so the screen can show it.
-    transitionImageLayout(commandBuffer, swapChain_.getImages()[imageIndex],
+void Renderer::finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {
+    // Transition Swapchain: ColorAttachment -> PresentSource
+    transitionImageLayout(cmd, swapChain_.getImages()[imageIndex],
                           vk::ImageLayout::eColorAttachmentOptimal,
                           vk::ImageLayout::ePresentSrcKHR,
                           vk::ImageAspectFlagBits::eColor);
-
-    commandBuffer.end();
 }
 
 void Renderer::createSyncObjects() {
@@ -257,7 +285,8 @@ void Renderer::createSyncObjects() {
 void Renderer::drawFrame(vk::Pipeline pipeline,
                          bool framebufferResized,
                          const Camera &camera,
-                         UserInterface &userInterface) {
+                         UserInterface &userInterface,
+                         const std::vector<RenderObject> &renderObjects) {
     auto device = context_.getDevice();
 
     // 1. Wait for the Frame Slot to be free (CPU-GPU Sync)
@@ -290,7 +319,7 @@ void Renderer::drawFrame(vk::Pipeline pipeline,
     updateUniformBuffer(currentFrame, camera);
 
     commandBuffers_[currentFrame].reset();
-    recordCommandBuffer(commandBuffers_[currentFrame], pipeline, imageIndex, userInterface);
+    recordCommandBuffer(commandBuffers_[currentFrame], pipeline, imageIndex, userInterface, renderObjects);
 
     // 5. Submit Info (Modern C++ Style)
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
@@ -355,7 +384,7 @@ void Renderer::recreateSwapChain() {
 
 
 void Renderer::createUniformBuffers() {
-    vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+    vk::DeviceSize bufferSize = sizeof(GlobalUBO);
 
     uniformBuffers_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
     uniformBuffersAllocation_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
@@ -368,7 +397,9 @@ void Renderer::createUniformBuffers() {
                      vk::BufferUsageFlagBits::eUniformBuffer, // Changed to vk:: enum
                      VMA_MEMORY_USAGE_CPU_TO_GPU,
                      uniformBuffers_[i], // These are now vk::Buffer
-                     uniformBuffersAllocation_[i], VMA_ALLOCATION_CREATE_MAPPED_BIT, &allocInfo);
+                     uniformBuffersAllocation_[i],
+                     VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                     &allocInfo);
 
         // Store the persistent pointer provided by the MAPPED flag
         uniformBuffersMapped_[i] = allocInfo.pMappedData;
@@ -421,8 +452,8 @@ void Renderer::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::Device
 }
 
 void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera) const {
-    UniformBufferObject ubo{};
-    ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(10.0f, 10.0f, -5.0f));
+    GlobalUBO ubo{};
+    // ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(10.0f, 10.0f, -5.0f));
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
 
@@ -451,7 +482,10 @@ void Renderer::createDescriptorSets() {
 
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         auto bufferInfo =
-            vk::DescriptorBufferInfo().setBuffer(uniformBuffers_[i]).setOffset(0).setRange(sizeof(UniformBufferObject));
+            vk::DescriptorBufferInfo()
+            .setBuffer(uniformBuffers_[i])
+            .setOffset(0)
+            .setRange(sizeof(GlobalUBO));
 
         auto descriptorWrite = vk::WriteDescriptorSet()
                                .setDstSet(descriptorSets_[i])

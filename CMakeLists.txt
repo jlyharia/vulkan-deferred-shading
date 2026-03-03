@@ -59,8 +59,6 @@ add_executable(${TARGET_NAME}
         src/vulkan/swap_chain.hpp
         src/vulkan/graphics_pipeline.cpp
         src/vulkan/graphics_pipeline.hpp
-        src/vulkan/render_pass.cpp
-        src/vulkan/render_pass.hpp
         src/renderer/renderer.cpp
         src/renderer/renderer.hpp
         src/common/config.hpp
@@ -80,6 +78,10 @@ add_executable(${TARGET_NAME}
         src/scene/Model.cpp
         src/scene/Model.hpp
         src/vulkan/VulkanUtils.hpp
+        src/core/AssetManager.cpp
+        src/core/AssetManager.hpp
+        src/scene/RenderObject.hpp
+        src/scene/Transform.hpp
 )
 
 # ------------------------------------------------------------

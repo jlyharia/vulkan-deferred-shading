@@ -25,11 +25,18 @@ public:
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
         std::vector<GltfMesh> meshes;
+        bool success = false;
     };
 
-    static ModelData loadFromFile(const std::string &path);
+    static ModelData loadFromFile(const std::string &path, bool isBinary);
 
 private:
-    static void processNode(const tinygltf::Model &input, const tinygltf::Node &node, ModelData &output);
-    static void processPrimitive(const tinygltf::Model &input, const tinygltf::Primitive &primitive, ModelData &output);
+    static void processNode(const tinygltf::Model &input,
+                            const tinygltf::Node &node,
+                            ModelData &output,
+                            glm::mat4 parentTransform);
+    static void processPrimitive(const tinygltf::Model &input,
+                                 const tinygltf::Primitive &primitive,
+                                 ModelData &output,
+                                 const glm::mat4 &nodeTransform);
 };

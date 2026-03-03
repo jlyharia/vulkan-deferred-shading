@@ -1,10 +1,16 @@
 #version 450
 
-layout (set = 0, binding = 0) uniform UniformBufferObject {
-    mat4 model;
+// 1. Global UBO: Only contains data that stays the same for the WHOLE frame
+layout (set = 0, binding = 0) uniform GlobalUBO {
     mat4 view;
     mat4 proj;
 } ubo;
+
+// 2. Push Constant: Data that changes per DRAW CALL
+layout (push_constant) uniform Push {
+    mat4 model;
+} pc;
+
 
 layout (location = 0) in vec3 inPosition;
 layout (location = 1) in vec3 inColor;
@@ -16,15 +22,12 @@ layout (location = 1) out vec3 fragNormal;
 layout (location = 2) out vec3 fragColor;
 
 void main() {
-    vec4 worldPos = ubo.model * vec4(inPosition, 1.0);
+    vec4 worldPos = pc.model * vec4(inPosition, 1.0);
     gl_Position = ubo.proj * ubo.view * worldPos;
 
-    // Pass world-space position for lighting
     fragPos = worldPos.xyz;
 
-    // Transform normal to world space (using Normal Matrix)
-    fragNormal = mat3(transpose(inverse(ubo.model))) * inNormal;
-
-    // Pass the raw color
+    // FIX: Use pc.model for normal transformation
+    fragNormal = mat3(transpose(inverse(pc.model))) * inNormal;
     fragColor = inColor;
 }
