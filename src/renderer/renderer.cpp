@@ -16,6 +16,7 @@
 #include "../scene/Model.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/swap_chain.hpp"
+#include "vulkan/VulkanUtils.hpp"
 
 
 // The C++ Bindings Header
@@ -24,7 +25,6 @@ Renderer::Renderer(VulkanContext &context, SwapChain &swapChain, GLFWwindow *win
     : context_(context), swapChain_(swapChain), window_(window_) {
 
     // 2. Initialize Command Infrastructure
-    createCommandPool();
     createCommandBuffers();
 
     // 3. Setup Synchronization (Fences/Semaphores)
@@ -60,8 +60,14 @@ Renderer::~Renderer() {
     vkDestroyDescriptorPool(context_.getDevice(), descriptorPool_, nullptr);
     std::cerr << "[Destructor] Renderer-descriptorPool_..." << std::endl;
 
-    vkDestroyDescriptorSetLayout(context_.getDevice(), descriptorSetLayout_, nullptr);
+    vkDestroyDescriptorSetLayout(context_.getDevice(), globalDescriptorSetLayout_, nullptr);
     std::cerr << "[Destructor] Renderer-descriptorSetLayout_..." << std::endl;
+
+    if (textureLayout_) {
+        vkDestroyDescriptorSetLayout(context_.getDevice(), textureLayout_, nullptr);
+        std::cerr << "[Destructor] Renderer-textureLayout_..." << std::endl;
+    }
+
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         // VMA automatically handles the Unmapping if you used
         // VMA_ALLOCATION_CREATE_MAPPED_BIT.
@@ -89,37 +95,20 @@ Renderer::~Renderer() {
         vkDestroySemaphore(context_.getDevice(), semaphore, nullptr);
     }
 
-    // 4. Destroy Command Pool (Implicitly frees all Command Buffers)
-    if (commandPool_ != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(context_.getDevice(), commandPool_, nullptr);
-    }
 }
 
-void Renderer::initResources(vk::PipelineLayout pipelineLayout) {
-    activePipelineLayout_ = pipelineLayout;
-
+void Renderer::initResources() {
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
 }
 
 
-void Renderer::createCommandPool() {
-    auto queueFamilyIndices = context_.findQueueFamilies(context_.getPhysicalDevice());
-
-    // VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT allows us to reuse command buffers every frame
-    vk::CommandPoolCreateInfo poolInfo{};
-    poolInfo.setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
-    poolInfo.setQueueFamilyIndex(queueFamilyIndices.graphicsFamily.value());
-
-    commandPool_ = context_.getDevice().createCommandPool(poolInfo);
-}
-
 void Renderer::createCommandBuffers() {
     commandBuffers_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
 
     auto allocInfo = vk::CommandBufferAllocateInfo()
-                     .setCommandPool(commandPool_)
+                     .setCommandPool(context_.getMainCommandPool())
                      .setLevel(vk::CommandBufferLevel::ePrimary)
                      .setCommandBufferCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
 
@@ -131,7 +120,8 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
                                    const vk::Pipeline pipeline,
                                    const uint32_t imageIndex,
                                    const UserInterface &userInterface,
-                                   const std::vector<RenderObject> &objects) const {
+                                   const std::vector<RenderObject> &renderObjs,
+                                   const vk::PipelineLayout activePipelineLayout) const {
     // 1. Setup
     auto beginInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     cmd.begin(beginInfo);
@@ -140,7 +130,7 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
         prepareFrameImages(cmd, imageIndex);
 
         // 3. Main Geometry Pass
-        renderScene(cmd, pipeline, imageIndex, objects);
+        renderScene(cmd, pipeline, imageIndex, renderObjs, activePipelineLayout);
 
         // 4. UI Pass (ImGui)
         // Note: UserInterface handles its own begin/endRendering internally
@@ -152,10 +142,11 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
     cmd.end();
 }
 
-void Renderer::renderScene(vk::CommandBuffer cmd,
-                           vk::Pipeline pipeline,
-                           uint32_t imageIndex,
-                           const std::vector<RenderObject> &objects) const {
+void Renderer::renderScene(const vk::CommandBuffer cmd,
+                           const vk::Pipeline pipeline,
+                           const uint32_t imageIndex,
+                           const std::vector<RenderObject> &objects,
+                           const vk::PipelineLayout activePipelineLayout) const {
 
     // Create attachment info using helpers to keep this clean
     auto colorAttachment = getPrimaryColorAttachment(imageIndex);
@@ -181,8 +172,8 @@ void Renderer::renderScene(vk::CommandBuffer cmd,
 
         // Bind Global Uniforms (Camera View/Proj) - Done ONCE per frame
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               activePipelineLayout_,
-                               0,
+                               activePipelineLayout,
+                               0, // This is Set 0 in your shader
                                {descriptorSets_[currentFrame]},
                                {});
 
@@ -193,7 +184,7 @@ void Renderer::renderScene(vk::CommandBuffer cmd,
 
             // 1. Push the Model Matrix (Transform) to the Shader
             cmd.pushConstants<glm::mat4>(
-                activePipelineLayout_,
+                activePipelineLayout,
                 vk::ShaderStageFlagBits::eVertex,
                 0,
                 transform.modelMatrix
@@ -204,9 +195,41 @@ void Renderer::renderScene(vk::CommandBuffer cmd,
             cmd.bindVertexBuffers(0, {model->getVertexBuffer()}, offsets);
             cmd.bindIndexBuffer(model->getIndexBuffer(), 0, vk::IndexType::eUint32);
 
-            // 3. Draw each part (Submesh) of the model
+            // 3. DRAW SUBMESHES (The Material Loop)
+            const auto &materials = model->getMaterials();
+
+            // if (!materials.empty() && materials[0].textureSet) {
+            //     cmd.bindDescriptorSets(
+            //         vk::PipelineBindPoint::eGraphics,
+            //         activePipelineLayout,
+            //         1,
+            //         1,
+            //         &materials[0].textureSet, // Always bind the first material
+            //         0, nullptr
+            //     );
+            // }
             for (const auto &submesh : model->getSubmeshes()) {
+
+                // --- NEW: BIND MATERIAL (SET 1) ---
+                if (submesh.materialIndex >= 0 && submesh.materialIndex < materials.size()) {
+                    const auto &mat = materials[submesh.materialIndex];
+
+                    // Only bind if a valid descriptor set exists for this material
+                    if (mat.textureSet) {
+                        cmd.bindDescriptorSets(
+                            vk::PipelineBindPoint::eGraphics,
+                            activePipelineLayout,
+                            1, // This is Set 1 in your shader
+                            1, // Binding 1 set
+                            &mat.textureSet, // Pointer to the handle
+                            0, nullptr // No dynamic offsets
+                            );
+                    }
+                }
+
+                // 4. Draw the specific index range for this material
                 cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
+                // cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
             }
         }
     }
@@ -282,11 +305,12 @@ void Renderer::createSyncObjects() {
     }
 }
 
-void Renderer::drawFrame(vk::Pipeline pipeline,
-                         bool framebufferResized,
+void Renderer::drawFrame(const vk::Pipeline pipeline,
+                         const bool framebufferResized,
                          const Camera &camera,
-                         UserInterface &userInterface,
-                         const std::vector<RenderObject> &renderObjects) {
+                         const UserInterface &userInterface,
+                         const std::vector<RenderObject> &renderObjects,
+                         const vk::PipelineLayout activePipelineLayout) {
     auto device = context_.getDevice();
 
     // 1. Wait for the Frame Slot to be free (CPU-GPU Sync)
@@ -319,7 +343,8 @@ void Renderer::drawFrame(vk::Pipeline pipeline,
     updateUniformBuffer(currentFrame, camera);
 
     commandBuffers_[currentFrame].reset();
-    recordCommandBuffer(commandBuffers_[currentFrame], pipeline, imageIndex, userInterface, renderObjects);
+    recordCommandBuffer(commandBuffers_[currentFrame], pipeline, imageIndex, userInterface, renderObjects,
+                        activePipelineLayout);
 
     // 5. Submit Info (Modern C++ Style)
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
@@ -429,7 +454,7 @@ void Renderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, Vma
 void Renderer::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const {
     vk::CommandBufferAllocateInfo allocInfo{};
     allocInfo.setLevel(vk::CommandBufferLevel::ePrimary);
-    allocInfo.setCommandPool(commandPool_);
+    allocInfo.setCommandPool(context_.getMainCommandPool());
     allocInfo.setCommandBufferCount(1);
 
     auto cmd = context_.getDevice().allocateCommandBuffers(allocInfo)[0];
@@ -448,31 +473,42 @@ void Renderer::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::Device
     context_.getGraphicsQueue().submit(submitInfo);
     context_.getGraphicsQueue().waitIdle(); // Simple sync for one-time transfer
 
-    context_.getDevice().freeCommandBuffers(commandPool_, cmd);
+    context_.getDevice().freeCommandBuffers(context_.getMainCommandPool(), cmd);
 }
 
 void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera) const {
-    GlobalUBO ubo{};
-    // ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(10.0f, 10.0f, -5.0f));
-    ubo.view = camera.getViewMatrix();
-    ubo.proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
-
+    GlobalUBO ubo{
+        .view = camera.getViewMatrix(),
+        .proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height),
+        .cameraPos = camera.position
+    };
     std::memcpy(uniformBuffersMapped_[currentFrame], &ubo, sizeof(ubo));
 }
 
 void Renderer::createDescriptorPool() {
-    auto poolSize = vk::DescriptorPoolSize()
-                    .setType(vk::DescriptorType::eUniformBuffer)
-                    .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
+    // Pool Size 1: For the Global UBO (Set 0)
+    constexpr auto uboPoolSize = vk::DescriptorPoolSize()
+                                 .setType(vk::DescriptorType::eUniformBuffer)
+                                 .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
 
-    auto poolInfo = vk::DescriptorPoolCreateInfo().setPoolSizeCount(1).setPPoolSizes(&poolSize).setMaxSets(
-        static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
+    // Pool Size 2: For the Texture Samplers (Set 1)
+    // Sponza has ~80 materials; let's reserve 200
+    constexpr auto samplerPoolSize = vk::DescriptorPoolSize()
+                                     .setType(vk::DescriptorType::eCombinedImageSampler)
+                                     .setDescriptorCount(200);
+
+    std::array<vk::DescriptorPoolSize, 2> poolSizes = {uboPoolSize, samplerPoolSize};
+    // samplerPoolSize.descriptorCount +
+    auto poolInfo = vk::DescriptorPoolCreateInfo()
+                    .setPoolSizeCount(poolSizes.size())
+                    .setPoolSizes(poolSizes)
+                    .setMaxSets(300);
 
     descriptorPool_ = context_.getDevice().createDescriptorPool(poolInfo);
 }
 
 void Renderer::createDescriptorSets() {
-    std::vector<vk::DescriptorSetLayout> layouts(engineConfig::MAX_FRAMES_IN_FLIGHT, descriptorSetLayout_);
+    std::vector<vk::DescriptorSetLayout> layouts(engineConfig::MAX_FRAMES_IN_FLIGHT, globalDescriptorSetLayout_);
     auto allocInfo = vk::DescriptorSetAllocateInfo()
                      .setDescriptorPool(descriptorPool_)
                      .setDescriptorSetCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT))
@@ -498,23 +534,60 @@ void Renderer::createDescriptorSets() {
     }
 }
 
+vk::DescriptorSet Renderer::createTextureDescriptorSet(
+    const vk::ImageView imageView,
+    const vk::Sampler sampler) {
+    // 1. Allocate a single set using the Texture Layout (Set 1)
+    auto allocInfo = vk::DescriptorSetAllocateInfo()
+                     .setDescriptorPool(descriptorPool_)
+                     .setSetLayouts(textureLayout_); // This is the layout you created for Set 1
+
+    // allocateDescriptorSets returns a vector; we just need the first one
+    const vk::DescriptorSet textureSet = context_.getDevice().allocateDescriptorSets(allocInfo)[0];
+
+    // 2. Update the set to point to the specific image/sampler
+    const auto imageInfo = vk::DescriptorImageInfo()
+                           .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                           .setImageView(imageView)
+                           .setSampler(sampler);
+
+    const auto descriptorWrite = vk::WriteDescriptorSet()
+                                 .setDstSet(textureSet)
+                                 .setDstBinding(0) // Binding 0 in Set 1
+                                 .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                                 .setDescriptorCount(1)
+                                 .setPImageInfo(&imageInfo);
+
+    context_.getDevice().updateDescriptorSets(descriptorWrite, nullptr);
+
+    return textureSet;
+}
+
 void Renderer::createDescriptorSetLayout() {
+    // Set 0: Global UBO (Camera)
     auto uboLayoutBinding = vk::DescriptorSetLayoutBinding()
                             .setBinding(0)
                             .setDescriptorType(vk::DescriptorType::eUniformBuffer)
                             .setDescriptorCount(1)
                             .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
 
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo().setBindingCount(1).setPBindings(&uboLayoutBinding);
+    // Set 1: Texture Sampler (Sponza Materials)
+    auto samplerLayoutBinding = vk::DescriptorSetLayoutBinding()
+                                .setBinding(0)
+                                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                                .setDescriptorCount(1)
+                                .setStageFlags(vk::ShaderStageFlagBits::eFragment);
 
-    descriptorSetLayout_ = context_.getDevice().createDescriptorSetLayout(layoutInfo);
+    // Create both layouts and store them as members
+    globalDescriptorSetLayout_ = context_.getDevice().createDescriptorSetLayout({{}, 1, &uboLayoutBinding});
+    textureLayout_ = context_.getDevice().createDescriptorSetLayout({{}, 1, &samplerLayoutBinding});
 }
 
-void Renderer::transitionImageLayout(vk::CommandBuffer cmd,
-                                     vk::Image image,
-                                     vk::ImageLayout oldLayout,
-                                     vk::ImageLayout newLayout,
-                                     vk::ImageAspectFlags aspectMask) const {
+void Renderer::transitionImageLayout(const vk::CommandBuffer cmd,
+                                     const vk::Image image,
+                                     const vk::ImageLayout oldLayout,
+                                     const vk::ImageLayout newLayout,
+                                     const vk::ImageAspectFlags aspectMask) const {
     vk::ImageMemoryBarrier2 barrier;
     barrier.setOldLayout(oldLayout)
            .setNewLayout(newLayout)
@@ -540,4 +613,37 @@ void Renderer::transitionImageLayout(vk::CommandBuffer cmd,
     dependencyInfo.setImageMemoryBarriers(barrier);
 
     cmd.pipelineBarrier2(dependencyInfo);
+}
+
+GltfModel Renderer::uploadModel(const GltfLoader::ModelData &data) const {
+    GltfModel model;
+    model.allocator = context_.getVmaAllocator();
+
+    // We grab the pool from the Context (as we refactored)
+    vk::CommandPool uploadPool = context_.getTransferCommandPool();
+
+    // The template automatically knows T is Vertex and calculates the size!
+    vk_util::uploadToDeviceBuffer(
+        model.allocator,
+        context_.getDevice(),
+        context_.getGraphicsQueue(),
+        uploadPool,
+        data.vertices,
+        vk::BufferUsageFlagBits::eVertexBuffer,
+        model.vertexBuffer,
+        model.vertexAllocation
+        );
+
+    vk_util::uploadToDeviceBuffer(
+        model.allocator,
+        context_.getDevice(),
+        context_.getGraphicsQueue(),
+        uploadPool,
+        data.indices,
+        vk::BufferUsageFlagBits::eIndexBuffer,
+        model.indexBuffer,
+        model.indexAllocation
+        );
+
+    return model;
 }

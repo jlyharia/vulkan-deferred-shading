@@ -30,7 +30,7 @@ public:
     float fov = 45.0f;
 
     Camera(glm::vec3 startPosition = glm::vec3(0.0f, 2.0f, 0.0f),
-           float startYaw = 45.0f, float startPitch = -10.0f)
+           float startYaw = 0.0f, float startPitch = 0.0f)
         : position(startPosition), yaw(startYaw), pitch(startPitch) {
         updateCameraVectors();
     }
@@ -95,7 +95,6 @@ public:
         updateCameraVectors();
     }
 
-private:
     // Calculates the front vector from the Camera's (updated) Euler Angles
     void updateCameraVectors() {
         // Calculate the new forward vector

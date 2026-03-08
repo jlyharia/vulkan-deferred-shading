@@ -6,6 +6,7 @@
 #include "common/VulkanInclude.hpp"
 #include "vulkan/VulkanContext.hpp"
 
+class Camera;
 class SwapChain;
 class VulkanContext;
 
@@ -20,7 +21,7 @@ public:
     void endFrame();
     // This records the UI commands into your existing command buffer
     void recordCommands(vk::CommandBuffer cmd, uint32_t imageIndex) const;
-
+    void drawCameraSettings(Camera& camera);
 private:
     VulkanContext &context_;
     SwapChain &swapChain_;

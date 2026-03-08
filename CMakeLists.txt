@@ -82,6 +82,11 @@ add_executable(${TARGET_NAME}
         src/core/AssetManager.hpp
         src/scene/RenderObject.hpp
         src/scene/Transform.hpp
+        src/scene/Texture.hpp
+        src/scene/TextureManager.cpp
+        src/scene/TextureManager.hpp
+        src/vulkan/VulkanUtils.cpp
+        src/common/Material.hpp
 )
 
 # ------------------------------------------------------------

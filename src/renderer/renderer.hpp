@@ -6,10 +6,13 @@
 
 #include "../scene/Camera.hpp"
 #include "scene/RenderObject.hpp"
+#include "system/GltfLoader.hpp"
 
 
 #include <memory>
 
+
+struct Texture;
 class Model;
 class UserInterface;
 // Forward declarations
@@ -17,33 +20,57 @@ class RenderPass;
 class SwapChain;
 class VulkanContext;
 
+
+struct GltfModel {
+    vk::Buffer vertexBuffer;
+    VmaAllocation vertexAllocation;
+
+    vk::Buffer indexBuffer;
+    VmaAllocation indexAllocation;
+    uint32_t indexCount;
+
+    // We keep the meshes and textures from ModelData
+    std::vector<Model::Submesh> subMeshes;
+    std::vector<Texture> textures;
+
+    // We'll need this to free everything later
+    VmaAllocator allocator;
+};
+
 class Renderer {
 public:
-    Renderer(VulkanContext &context, SwapChain &swapChain, GLFWwindow *window);
+    Renderer(VulkanContext &context,
+             SwapChain &swapChain,
+             GLFWwindow *window);
     ~Renderer();
 
     // Disable copying
     Renderer(const Renderer &) = delete;
     Renderer &operator=(const Renderer &) = delete;
 
-    void initResources(vk::PipelineLayout pipelineLayout);
+    void initResources();
     void createDescriptorSetLayout();
 
     // Changed to vk::Pipeline for C++ style consistency
     void drawFrame(vk::Pipeline pipeline,
                    bool framebufferResized,
                    const Camera &camera,
-                   UserInterface &userInterface,
-                   const std::vector<RenderObject> &renderObjects);
+                   const UserInterface &userInterface,
+                   const std::vector<RenderObject> &renderObjects, vk::PipelineLayout activePipelineLayout);
 
     void recreateSwapChain();
 
-    [[nodiscard]] vk::DescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_; }
+    [[nodiscard]] vk::DescriptorSetLayout getGlobalDescriptorSetLayout() const { return globalDescriptorSetLayout_; }
+    [[nodiscard]] vk::DescriptorSetLayout getTextureDescriptorSetLayout() const { return textureLayout_; }
 
-    [[nodiscard]] vk::CommandPool getCommandPool() const { return commandPool_; }
+    [[nodiscard]] std::vector<vk::DescriptorSetLayout> getDescriptorSetLayouts() const {
+        // The order here MUST match your set = 0, set = 1 in GLSL
+        return {globalDescriptorSetLayout_, textureLayout_};
+    }
+
+    vk::DescriptorSet createTextureDescriptorSet(vk::ImageView imageView, vk::Sampler sampler);
 
 private:
-    void createCommandPool();
     void createCommandBuffers();
     void createSyncObjects();
 
@@ -52,13 +79,14 @@ private:
                              vk::Pipeline pipeline,
                              uint32_t imageIndex,
                              const UserInterface &userInterface,
-                             const std::vector<RenderObject> &objects) const;
+                             const std::vector<RenderObject> &renderObjs,
+                             vk::PipelineLayout activePipelineLayout) const;
     void renderScene(vk::CommandBuffer cmd,
                      vk::Pipeline pipeline,
                      uint32_t imageIndex,
-                     const std::vector<RenderObject> &objects) const;
-    vk::RenderingAttachmentInfo getPrimaryColorAttachment(uint32_t imageIndex) const;
-    vk::RenderingAttachmentInfo getPrimaryDepthAttachment() const;
+                     const std::vector<RenderObject> &objects, vk::PipelineLayout activePipelineLayout) const;
+    [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryColorAttachment(uint32_t imageIndex) const;
+    [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryDepthAttachment() const;
     void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
     void finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
 
@@ -73,10 +101,14 @@ private:
     void updateUniformBuffer(uint32_t currentFrame, const Camera &camera) const;
     void createDescriptorPool();
     void createDescriptorSets();
-    void transitionImageLayout(vk::CommandBuffer cmd, vk::Image image,
-                               vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+
+    void transitionImageLayout(vk::CommandBuffer cmd,
+                               vk::Image image,
+                               vk::ImageLayout oldLayout,
+                               vk::ImageLayout newLayout,
                                vk::ImageAspectFlags aspectMask) const;
 
+    GltfModel uploadModel(const GltfLoader::ModelData &data) const;
 
     // --- Members ---
     VulkanContext &context_;
@@ -84,8 +116,6 @@ private:
     GLFWwindow *window_;
 
     // Core Vulkan Handles (C++ style)
-    vk::PipelineLayout activePipelineLayout_;
-    vk::CommandPool commandPool_;
     std::vector<vk::CommandBuffer> commandBuffers_;
 
     // Synchronization (C++ style)
@@ -104,7 +134,8 @@ private:
     // Descriptors (C++ style)
     vk::DescriptorPool descriptorPool_;
     std::vector<vk::DescriptorSet> descriptorSets_;
-    vk::DescriptorSetLayout descriptorSetLayout_;
+    vk::DescriptorSetLayout globalDescriptorSetLayout_;
+    vk::DescriptorSetLayout textureLayout_;
 
     // ModelSystem ms;
     std::unique_ptr<Model> model_;

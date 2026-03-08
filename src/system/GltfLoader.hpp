@@ -3,34 +3,40 @@
 //
 #pragma once
 
+#include <common/VulkanInclude.hpp>
 #include <string>
 #include <vector>
 #include <memory>
-// IMPORTANT: These must match vendor_impl.cpp exactly
-// so the compiler looks for the same function signatures
-#define TINYGLTF_NO_STB_IMAGE
-#define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 #include "../common/Vertex.hpp"
+#include "scene/Model.hpp"
+#include "scene/TextureManager.hpp"
 
-struct GltfMesh {
-    uint32_t firstIndex;
-    uint32_t indexCount;
-    int materialIndex;
-};
+
+struct Texture;
 
 class GltfLoader {
 public:
     struct ModelData {
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
-        std::vector<GltfMesh> meshes;
+        std::vector<Model::Submesh> primitives;
+        // Maps Material ID -> Texture ID
+        std::map<int, int> materialToTexture;
+        std::vector<Texture> textures;
         bool success = false;
     };
 
-    static ModelData loadFromFile(const std::string &path, bool isBinary);
+    // Constructor: Needs the manager to upload textures to GPU
+    explicit GltfLoader(TextureManager &textureManager) : textureManager_(textureManager) {
+    }
+
+    [[nodiscard]] ModelData loadFromFile(const std::string &path, bool isBinary) const;
 
 private:
+    TextureManager &textureManager_;
+
+    void loadImages(const tinygltf::Model &model, ModelData &output) const;
     static void processNode(const tinygltf::Model &input,
                             const tinygltf::Node &node,
                             ModelData &output,

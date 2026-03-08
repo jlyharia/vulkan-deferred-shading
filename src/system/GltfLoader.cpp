@@ -8,19 +8,19 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 
-GltfLoader::ModelData GltfLoader::loadFromFile(const std::string &path, const bool isBinary) {
+GltfLoader::ModelData GltfLoader::loadFromFile(const std::string &path, const bool isBinary) const {
     tinygltf::Model input;
     tinygltf::TinyGLTF context;
     std::string warn, err;
-    ModelData output;
-    output.success = false;
+    ModelData modelData;
+    modelData.success = false;
 
-    // 1. Path Validation
+    // 1. Path processPrimitive
     // This ensures we don't even try to load if the file is missing from your symlinked assets
     if (!std::filesystem::exists(path)) {
         std::cerr << "[glTF Err] File does not exist at: " << path << std::endl;
         std::cerr << "[glTF Err] Check if your 'assets' symlink in cmake-build-debug is broken." << std::endl;
-        return output;
+        return modelData;
     }
     std::cout << "[Debug] Attempting to load glTF from: "
         << std::filesystem::absolute(path) << std::endl;
@@ -30,22 +30,22 @@ GltfLoader::ModelData GltfLoader::loadFromFile(const std::string &path, const bo
     // 2. Disable internal image loading
     // Since you don't have the stb_image callback set up yet, this prevents a crash
     // context.SetImageLoader(nullptr, nullptr);
-    context.SetImageLoader([](tinygltf::Image *, const int, std::string *,
-                              std::string *, int, int, const unsigned char *,
-                              int, void *) {
-        return true;
-    }, nullptr);
-    // 3. Load the File
-    bool fileLoaded = false;
-    if (isBinary) {
-        fileLoaded = context.LoadBinaryFromFile(&input, &err, &warn, path);
-    } else {
-        // TinyGLTF automatically uses the directory of 'path' as the base
-        // to find 'Sponza.bin'. As long as the path is correct, it works!
-        fileLoaded = context.LoadASCIIFromFile(&input, &err, &warn, path);
-    }
+    // context.SetImageLoader([](tinygltf::Image *, const int, std::string *,
+    //                           std::string *, int, int, const unsigned char *,
+    //                           int, void *) {
+    // return true;
+    // }, nullptr);
+    // 2. RE-ENABLE Image Loading
+    // We use tinygltf's default loader (stb_image) to get the raw pixels
+    // but we won't upload them to Vulkan yet.
+    const bool fileLoaded = isBinary
+                                ? context.LoadBinaryFromFile(&input, &err, &warn, path)
+                                : context.LoadASCIIFromFile(&input, &err, &warn, path);
 
-    // 4. Handle Load Results
+    // 3. LOAD TEXTURES FIRST
+    // This populates output.textures via your TextureManager
+    loadImages(input, modelData);
+
     if (!warn.empty())
         std::cout << "[glTF Warn]: " << warn << std::endl;
     if (!err.empty())
@@ -53,32 +53,50 @@ GltfLoader::ModelData GltfLoader::loadFromFile(const std::string &path, const bo
 
     if (!fileLoaded) {
         std::cerr << "[glTF Err] Failed to parse glTF: " << path << std::endl;
-        return output;
+        return modelData;
     }
 
-    // 5. Scene Traversal
+    modelData.materialToTexture.clear();
+    for (size_t i = 0; i < input.materials.size(); i++) {
+        const auto &gltfMat = input.materials[i];
+
+        // We specifically want the Base Color (Diffuse) map
+        const int baseColorTexIndex = gltfMat.pbrMetallicRoughness.baseColorTexture.index;
+
+        if (baseColorTexIndex != -1) {
+            // glTF Texture index -> glTF Image source index
+            const int imageIndex = input.textures[baseColorTexIndex].source;
+            modelData.materialToTexture[static_cast<int>(i)] = imageIndex;
+        } else {
+            // No texture for this material (use -1 to trigger white fallback later)
+            modelData.materialToTexture[static_cast<int>(i)] = -1;
+        }
+    }
+    // 4. SCENE TRAVERSAL
     // Sponza often has many nodes; we must traverse starting from the default scene
     const tinygltf::Scene &scene = input.scenes[input.defaultScene > -1 ? input.defaultScene : 0];
 
     // Optimization: Pre-allocate memory to handle Sponza's high vertex count
-    output.vertices.reserve(200000);
-    output.indices.reserve(200000);
+    modelData.vertices.reserve(200000);
+    modelData.indices.reserve(200000);
 
     for (int nodeIdx : scene.nodes) {
-        processNode(input, input.nodes[nodeIdx], output, glm::mat4(1.0f));
+        processNode(input, input.nodes[nodeIdx], modelData, glm::mat4(1.0f));
     }
 
     // 6. Success Check
-    if (output.vertices.empty()) {
+    if (modelData.vertices.empty()) {
         std::cerr << "[glTF Err] Logic error: Loaded file but found 0 vertices. Check processNode recursion." <<
             std::endl;
     } else {
-        output.success = true;
-        std::cout << "[glTF Success] Loaded " << path << " ("
-            << output.vertices.size() << " vertices)" << std::endl;
+        modelData.success = true;
+        std::cout << "[glTF Success] " << path << ":" << std::endl;
+        std::cout << "   - Vertices: " << modelData.vertices.size() << std::endl;
+        std::cout << "   - Primitives: " << modelData.primitives.size() << std::endl;
+        std::cout << "   - Textures: " << modelData.textures.size() << std::endl;
     }
 
-    return output;
+    return modelData;
 }
 
 // Update your function signature to accept a parent transform
@@ -140,10 +158,9 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
     const float *bufferTexCoords = nullptr;
     int posStride = 0, normStride = 0, texStride = 0;
 
-    // vertexStart is the offset for indices so they point to the correct vertices in the global list
     uint32_t vertexStart = static_cast<uint32_t>(output.vertices.size());
 
-    // --- 1. Extract Attributes (Position, Normal, UV) ---
+    // --- 1. Extract Attributes ---
     if (primitive.attributes.contains("POSITION")) {
         const tinygltf::Accessor &acc = input.accessors[primitive.attributes.at("POSITION")];
         const tinygltf::BufferView &view = input.bufferViews[acc.bufferView];
@@ -168,9 +185,26 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
         texStride = acc.ByteStride(view) / sizeof(float);
     }
 
+    // --- NEW: Material Factor Capture ---
+    glm::vec3 baseColorFactor(1.0f); // Default to white
+    if (primitive.material > -1) {
+        const auto &gltfMat = input.materials[primitive.material];
+        const auto &pbr = gltfMat.pbrMetallicRoughness;
+
+        baseColorFactor = glm::vec3(
+            static_cast<float>(pbr.baseColorFactor[0]),
+            static_cast<float>(pbr.baseColorFactor[1]),
+            static_cast<float>(pbr.baseColorFactor[2])
+            );
+
+        // DEBUG: Uncomment this to verify the arches are actually being assigned a color
+        if (baseColorFactor.r < 1.0f) {
+            std::cout << "[GltfLoader] Material " << primitive.material << " Factor: "
+                      << baseColorFactor.r << ", " << baseColorFactor.g << std::endl;
+        }
+    }
+
     // --- 2. Calculate Normal Matrix ---
-    // Directions (normals) must be transformed by the inverse-transpose of the world matrix
-    // to remain perpendicular to the surface in case of non-uniform scaling.
     glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(nodeTransform)));
 
     // --- 3. Assemble Vertex Data ---
@@ -178,11 +212,11 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
     for (size_t v = 0; v < count; v++) {
         Vertex vert{};
 
-        // Transform Local Position to World Position
+        // Position
         glm::vec3 rawPos = glm::make_vec3(&bufferPos[v * posStride]);
         vert.pos = glm::vec3(nodeTransform * glm::vec4(rawPos, 1.0f));
 
-        // Transform Local Normal to World Normal
+        // Normal (Location 1)
         if (bufferNormals) {
             glm::vec3 rawNormal = glm::make_vec3(&bufferNormals[v * normStride]);
             vert.normal = glm::normalize(normalMatrix * rawNormal);
@@ -190,13 +224,16 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
             vert.normal = glm::vec3(0.0f, 1.0f, 0.0f);
         }
 
-        // Handle UVs (Vulkan Y-flip)
+        // UV (Location 2)
         if (bufferTexCoords) {
             vert.uv = glm::make_vec2(&bufferTexCoords[v * texStride]);
             vert.uv.y = 1.0f - vert.uv.y;
         }
 
-        vert.color = glm::vec3(1.0f); // Default white color
+        // Color (Location 3)
+        // This MUST be set to the baseColorFactor for the arches to show stone color
+        vert.color = baseColorFactor;
+
         output.vertices.push_back(vert);
     }
 
@@ -221,7 +258,21 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
                 output.indices.push_back(buf[i] + vertexStart);
         }
 
-        // Save sub-mesh info for rendering/materials
-        output.meshes.push_back({firstIndex, indexCount, primitive.material});
+        output.primitives.push_back({firstIndex, indexCount, primitive.material});
+    }
+}
+
+void GltfLoader::loadImages(const tinygltf::Model &model, ModelData &output) const {
+    std::cout << "[glTF] Uploading " << model.images.size() << " textures to GPU..." << std::endl;
+    output.textures.resize(model.images.size());
+    for (size_t i = 0; i < model.images.size(); i++) {
+        const auto &gltfImage = model.images[i];
+
+        // 2. Load and place specifically at index 'i'
+        // This ensures output.textures[i] corresponds to tinygltf image index 'i'
+        output.textures[i] = textureManager_.loadTextureFromGltf(gltfImage);
+
+        // Optional: Debugging log to track progress
+        std::cout << "  [Texture " << i << "] " << gltfImage.name << " loaded." << std::endl;
     }
 }
