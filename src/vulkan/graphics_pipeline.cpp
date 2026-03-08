@@ -62,8 +62,8 @@ void GraphicsPipeline::createGraphicsPipeline() {
                       .setRasterizerDiscardEnable(false)
                       .setPolygonMode(vk::PolygonMode::eFill)
                       .setLineWidth(1.0f)
-                      .setCullMode(vk::CullModeFlagBits::eBack)
-                      .setFrontFace(vk::FrontFace::eCounterClockwise)
+                      .setCullMode(vk::CullModeFlagBits::eBack) // Cull back faces
+                      .setFrontFace(vk::FrontFace::eCounterClockwise) // Standard for GLTF
                       .setDepthBiasEnable(false);
 
     // Multisampling
@@ -133,13 +133,18 @@ vk::ShaderModule GraphicsPipeline::createShaderModule(const std::vector<char> &c
     return context_.getDevice().createShaderModule(createInfo);
 }
 
-void GraphicsPipeline::createPipelineLayout(vk::DescriptorSetLayout dsLayout) {
-    // Push Constant for shading mode
-    auto pushConstantRange =
-        vk::PushConstantRange().setStageFlags(vk::ShaderStageFlagBits::eVertex).setOffset(0).setSize(sizeof(glm::mat4));
 
-    auto pipelineLayoutInfo =
-        vk::PipelineLayoutCreateInfo().setSetLayouts(dsLayout).setPushConstantRanges(pushConstantRange);
+void GraphicsPipeline::createPipelineLayout(const std::vector<vk::DescriptorSetLayout> &desLayouts) {
+    // Push Constant for shading mode
+    auto pushConstantRange = vk::PushConstantRange()
+                             .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+                             .setOffset(0)
+                             .setSize(sizeof(glm::mat4));
+
+    // Combine the layouts from the Renderer with the Push Constant
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo()
+                              .setSetLayouts(desLayouts)
+                              .setPushConstantRanges(pushConstantRange);
 
     pipelineLayout_ = context_.getDevice().createPipelineLayout(pipelineLayoutInfo);
 }

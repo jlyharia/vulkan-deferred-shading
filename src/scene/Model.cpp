@@ -8,11 +8,13 @@
 #include <tiny_gltf.h>
 #include <unordered_map>
 #include "../vulkan/VulkanUtils.hpp"
+#include "renderer/renderer.hpp"
 
 #include <fstream>
 #include <iostream>
 #include <algorithm> // Required for std::ranges::transform
 #include <cctype>    // Required for ::tolower
+#include <filesystem>
 
 Model::~Model() {
     // VMA is safe: it ignores null handles, but checking is cleaner
@@ -29,7 +31,7 @@ Model::~Model() {
     }
 }
 
-bool Model::loadFromFile(const std::string &filePath) {
+bool Model::loadFromFile(const std::string &filePath, TextureManager &textureManager, Renderer &renderer) {
     namespace fs = std::filesystem;
     fs::path path(filePath);
 
@@ -47,9 +49,9 @@ bool Model::loadFromFile(const std::string &filePath) {
         return std::tolower(c);
     });
     // 3. Handle OBJ directly
-    if (ext == ".obj") {
-        return loadObj(filePath);
-    }
+    // if (ext == ".obj") {
+    //     return loadObj(filePath);
+    // }
 
     // 4. Handle glTF / glb using Header Detection (Magic Number)
     if (ext == ".gltf" || ext == ".glb") {
@@ -64,107 +66,128 @@ bool Model::loadFromFile(const std::string &filePath) {
         // "glTF" in ASCII is the magic number for binary .glb
         bool isBinary = (std::strncmp(header, "glTF", 4) == 0);
 
-        return loadGltf(filePath, isBinary);
+        return loadGltf(filePath, isBinary, textureManager, renderer);
     }
 
     std::cerr << "[Model] Unsupported file extension: " << ext << std::endl;
     return false;
 }
 
-bool Model::loadGltf(const std::string &filePath, bool isBinary) {
-    // We pass the isBinary flag we detected in the header check
-    auto data = GltfLoader::loadFromFile(filePath, isBinary);
 
-    if (!data.success) {
+/**
+ *
+2. The "Handle" Pattern (Industrial Standard)
+
+In industrial engines, the Model doesn't know how to render; it just holds Handles.
+Think of the vk::DescriptorSet as a "key." The Model holds the key, but only the Renderer knows how to use that key to open the "GPU door."
+
+If you don't pass the Renderer (or a resource factory) into loadGltf, your Model would just have a list of image file paths. Then, every frame, the Renderer would have to check: "Do I have a descriptor for this path yet?" This is extremely slow.
+3. Better Architecture: The "Resource Factory"
+
+If passing the entire Renderer into your Model feels too "heavy" (and I agree, it is), the professional way to fix this is to use a Resource Factory or Descriptor Allocator.
+
+Instead of:
+bool loadGltf(..., Renderer &renderer)
+
+todo Use:
+bool loadGltf(..., IDescriptorAllocator &allocator)
+ */
+// bool Model::loadGltf(const std::string &filePath,
+//                      const bool isBinary,
+//                      TextureManager &textureManager,
+//                      Renderer &renderer) {
+//     // We pass the isBinary flag we detected in the header check
+//
+//     const GltfLoader gltf_loader(textureManager);
+//
+//     auto data = gltf_loader.loadFromFile(filePath, isBinary);
+//
+//     if (!data.success) {
+//         return false;
+//     }
+//
+//     // Clear old data for re-loading safety
+//     vertices_.clear();
+//     indices_.clear();
+//     submeshes_.clear();
+//
+//     // 1. Move basic geometry
+//     // Move data (Zero-copy)
+//     vertices_ = std::move(data.vertices);
+//     indices_ = std::move(data.indices);
+//     indexCount_ = static_cast<uint32_t>(indices_.size());
+//
+//     for (const auto &m : data.primitives) {
+//         submeshes_.push_back({m.firstIndex, m.indexCount, m.materialIndex});
+//     }
+//
+//     // 2. Create Materials and Descriptor Sets
+//     this->materials_.reserve(data.textures.size());
+//     for (const auto &tex : data.textures) {
+//         Material mat;
+//         mat.name = "Sponza_Material";
+//
+//         // THE KEY STEP: Ask the renderer to create a Set 1 for this texture
+//         // This function would allocate from the pool and write the descriptor
+//         mat.textureSet = renderer.createTextureDescriptorSet(tex.imageView, tex.sampler);
+//
+//         this->materials_.push_back(mat);
+//     }
+//     std::cout << "[Model] Loaded glTF: " << filePath << " (" << vertices_.size() << " verts)" << std::endl;
+//     return true;
+// }
+
+bool Model::loadGltf(const std::string &filePath,
+                     const bool isBinary,
+                     TextureManager &textureManager,
+                     Renderer &renderer) {
+
+    GltfLoader gltf_loader(textureManager);
+    auto data = gltf_loader.loadFromFile(filePath, isBinary);
+
+    if (!data.success)
         return false;
-    }
 
-    // Clear old data for re-loading safety
-    vertices_.clear();
-    indices_.clear();
-    submeshes_.clear();
-
-    // Move data (Zero-copy)
+    // 1. Geometry Move
     vertices_ = std::move(data.vertices);
     indices_ = std::move(data.indices);
-    indexCount_ = static_cast<uint32_t>(indices_.size());
+    submeshes_ = std::move(data.primitives);
 
-    for (const auto &m : data.meshes) {
-        submeshes_.push_back({m.firstIndex, m.indexCount, m.materialIndex});
+    // 2. Create Descriptor Sets for every image loaded in the glTF
+    // We do this first so we have a 'pool' of textures to pick from
+    std::vector<vk::DescriptorSet> textureSets;
+    textureSets.reserve(data.textures.size());
+    for (const auto &tex : data.textures) {
+        textureSets.push_back(renderer.createTextureDescriptorSet(tex.imageView, tex.sampler));
     }
 
-    std::cout << "[Model] Loaded glTF: " << filePath << " (" << vertices_.size() << " verts)" << std::endl;
-    return true;
-}
+    // 3. Match Materials to those Sets
+    // We need to size this according to how many materials the loader found
+    this->materials_.clear();
 
-bool Model::loadObj(const std::string &filePath) {
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn, err;
+    // Determine the number of materials in the glTF
+    // If the map is empty, we have no materials to process
+    if (!data.materialToTexture.empty()) {
+        int maxMatIdx = 0;
+        for (auto const &[idx, _] : data.materialToTexture) {
+            maxMatIdx = std::max(maxMatIdx, idx);
+        }
+        materials_.resize(maxMatIdx + 1);
 
-    // 1. Attempt to load the file
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filePath.c_str())) {
-        std::cerr << "[TinyOBJ] Error: " << err << " (Warning: " << warn << ")" << std::endl;
-        return false; // Graceful failure
-    }
+        for (int i = 0; i <= maxMatIdx; ++i) {
+            if (data.materialToTexture.contains(i)) {
+                int imgIdx = data.materialToTexture.at(i);
 
-    // Optional: Log warnings even if loading succeeded
-    if (!warn.empty()) {
-        std::cout << "[TinyOBJ] Warning: " << warn << std::endl;
-    }
-
-    std::unordered_map<Vertex, uint32_t> uniqueVertices{};
-
-    // Clear existing data in case this is a re-load
-    vertices_.clear();
-    indices_.clear();
-
-    for (const auto &shape : shapes) {
-        for (const auto &index : shape.mesh.indices) {
-            Vertex vertex{};
-
-            vertex.pos = {
-                attrib.vertices[3 * index.vertex_index + 0],
-                attrib.vertices[3 * index.vertex_index + 1],
-                attrib.vertices[3 * index.vertex_index + 2]
-            };
-
-            if (index.normal_index >= 0) {
-                vertex.normal = {
-                    attrib.normals[3 * index.normal_index + 0],
-                    attrib.normals[3 * index.normal_index + 1],
-                    attrib.normals[3 * index.normal_index + 2]
-                };
+                // If this material points to a valid image, link the DescriptorSet
+                if (imgIdx != -1 && imgIdx < textureSets.size()) {
+                    materials_[i].textureSet = textureSets[imgIdx];
+                }
             }
-
-            if (index.texcoord_index >= 0) {
-                vertex.uv = {
-                    attrib.texcoords[2 * index.texcoord_index + 0],
-                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                };
-            }
-
-            vertex.color = {1.0f, 1.0f, 1.0f};
-
-            if (uniqueVertices.count(vertex) == 0) {
-                uniqueVertices[vertex] = static_cast<uint32_t>(vertices_.size());
-                vertices_.push_back(vertex);
-            }
-            indices_.push_back(uniqueVertices[vertex]);
         }
     }
 
-    indexCount_ = static_cast<uint32_t>(indices_.size());
-    submeshes_.push_back({0, static_cast<uint32_t>(indices_.size()), -1});
-
-    // 2. Final check: did we actually get any geometry?
-    if (vertices_.empty()) {
-        std::cerr << "[Model] Error: No geometry found in " << filePath << std::endl;
-        return false;
-    }
-
-    return true; // Success!
+    std::cout << "[Model] Finalized " << materials_.size() << " materials for " << filePath << std::endl;
+    return true;
 }
 
 void Model::uploadToGPU(vk::Device device, vk::Queue queue, vk::CommandPool commandPool) {
@@ -173,23 +196,30 @@ void Model::uploadToGPU(vk::Device device, vk::Queue queue, vk::CommandPool comm
         std::cerr << "[Model Error] Attempted to upload empty mesh data to GPU! Check loader." << std::endl;
         return;
     }
-    // Vertex Buffer
-    createAndUploadBuffer(device,
-                          queue,
-                          commandPool,
-                          vertices_.size() * sizeof(Vertex),
-                          vk::BufferUsageFlagBits::eVertexBuffer,
-                          vertices_.data(),
-                          vertexBuffer_
+    // 1. Vertex Buffer Upload
+    // Note: vertexBuffer_ is assumed to be an 'AllocatedBuffer' struct
+    vk_util::uploadToDeviceBuffer(
+        allocator_,
+        device,
+        queue,
+        commandPool,
+        vertices_,
+        vk::BufferUsageFlagBits::eVertexBuffer,
+        vertexBuffer_.buffer,
+        vertexBuffer_.allocation
         );
 
-    // Index Buffer
-    createAndUploadBuffer(device,
-                          queue, commandPool,
-                          indices_.size() * sizeof(uint32_t),
-                          vk::BufferUsageFlagBits::eIndexBuffer,
-                          indices_.data(),
-                          indexBuffer_
+    // 2. Index Buffer Upload
+    vk_util::uploadToDeviceBuffer(
+        allocator_,
+        device,
+        queue,
+        commandPool,
+        indices_,
+
+        vk::BufferUsageFlagBits::eIndexBuffer,
+        indexBuffer_.buffer,
+        indexBuffer_.allocation
         );
 
     // --- NEW: Discard CPU data ---
@@ -202,45 +232,4 @@ void Model::uploadToGPU(vk::Device device, vk::Queue queue, vk::CommandPool comm
     indices_.shrink_to_fit();
 
     std::cout << "[Model] GPU upload complete. CPU memory cleared." << std::endl;
-}
-
-void Model::createAndUploadBuffer(
-    vk::Device device,
-    vk::Queue queue,
-    vk::CommandPool commandPool,
-    vk::DeviceSize size,
-    vk::BufferUsageFlags usage,
-    const void *data,
-    AllocatedBuffer &outBuffer) const {
-    // 1. Create Staging Buffer (CPU Visible)
-    vk::Buffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    VulkanUtils::createBuffer(
-        allocator_, size,
-        vk::BufferUsageFlagBits::eTransferSrc,
-        VMA_MEMORY_USAGE_CPU_ONLY,
-        stagingBuffer, stagingAlloc
-        );
-
-    // 2. Copy CPU data to Staging
-    void *mappedData;
-    vmaMapMemory(allocator_, stagingAlloc, &mappedData);
-    memcpy(mappedData, data, static_cast<size_t>(size));
-    vmaUnmapMemory(allocator_, stagingAlloc);
-
-    // 3. Create GPU Buffer (Device Local)
-    VulkanUtils::createBuffer(
-        allocator_, size,
-        vk::BufferUsageFlagBits::eTransferDst | usage,
-        VMA_MEMORY_USAGE_GPU_ONLY,
-        outBuffer.buffer, outBuffer.allocation
-        );
-
-    // 4. Copy from Staging to GPU
-    // Note: This uses your VulkanUtils helper which usually handles
-    // the fence/submission internally.
-    VulkanUtils::copyBuffer(device, commandPool, queue, stagingBuffer, outBuffer.buffer, size);
-
-    // 5. Cleanup Staging
-    vmaDestroyBuffer(allocator_, stagingBuffer, stagingAlloc);
 }

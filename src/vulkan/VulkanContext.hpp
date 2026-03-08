@@ -71,12 +71,18 @@ public:
     [[nodiscard]] vk::Queue getPresentQueue() const { return presentQueue_; }
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
 
-    // vk::Format findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling,
-    //                              VkFormatFeatureFlags features);
-    vk::Format findSupportedFormat(const std::vector<vk::Format> &candidates,
-                                   vk::ImageTiling tiling,
-                                   vk::FormatFeatureFlags features) const;
-    VmaAllocator getVmaAllocator() const { return vmaAllocator_; }
+    [[nodiscard]] vk::Format findSupportedFormat(const std::vector<vk::Format> &candidates,
+                                                 vk::ImageTiling tiling,
+                                                 vk::FormatFeatureFlags features) const;
+    [[nodiscard]] VmaAllocator getVmaAllocator() const { return vmaAllocator_; }
+
+    // Pool for main frame rendering (Commands that are reset every frame)
+    [[nodiscard]] vk::CommandPool getMainCommandPool() const { return mainCommandPool_; }
+
+    // Pool for loading/transfer (One-time submit commands)
+    [[nodiscard]] vk::CommandPool getTransferCommandPool() const { return transferCommandPool_; }
+
+    [[nodiscard]] QueueFamilyIndices getQueueIndices() const { return queueIndices_; };
 
 private:
     GLFWwindow *window_;
@@ -98,6 +104,10 @@ private:
     std::unique_ptr<Validation> validation_;
     // Memory Resources (VMA + vk::Buffer)
     VmaAllocator vmaAllocator_ = nullptr;
+    vk::CommandPool mainCommandPool_;
+    vk::CommandPool transferCommandPool_;
+    // Store the indices as a member
+    QueueFamilyIndices queueIndices_;
     void createInstance();
 
     void setupDebugMessenger();
@@ -120,4 +130,5 @@ private:
     static bool checkDeviceExtensionSupport(vk::PhysicalDevice device);
     int rateDeviceSuitability(vk::PhysicalDevice device);
     void initVmaAllocator();
+    void createCommandPools();
 };

@@ -15,4 +15,5 @@ struct UniformBufferObject {
 struct GlobalUBO {
     alignas(16)glm::mat4 view;
     alignas(16)glm::mat4 proj;
+    alignas(16) glm::vec3 cameraPos;
 }; // move glm::mat4 model to push constant

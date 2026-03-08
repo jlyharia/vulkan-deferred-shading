@@ -7,10 +7,10 @@
 #include <vulkan/vulkan.hpp>
 
 struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec3 normal;
-    glm::vec2 uv; // tex Coord
+    glm::vec3 pos; // Location 0
+    glm::vec3 normal; // Location 1
+    glm::vec2 uv; // Location 2
+    glm::vec3 color; // Location 3
 
     // Helper function to tell Vulkan how to read this struct
     static vk::VertexInputBindingDescription getBindingDescription() {
@@ -21,37 +21,29 @@ struct Vertex {
     static std::array<vk::VertexInputAttributeDescription, 4> getAttributeDescriptions() {
         std::array<vk::VertexInputAttributeDescription, 4> attributeDescriptions{};
 
-        // Position: location 0, format R32G32B32 (vec3)
-        attributeDescriptions[0] = vk::VertexInputAttributeDescription(
-            0, // location
-            0, // binding
-            vk::Format::eR32G32B32Sfloat, // format
-            offsetof(Vertex, pos) // offset
-            );
+        // Location 0: Position (vec3)
+        attributeDescriptions[0].setBinding(0)
+                                .setLocation(0)
+                                .setFormat(vk::Format::eR32G32B32Sfloat)
+                                .setOffset(offsetof(Vertex, pos));
 
-        // Color: location 1
-        attributeDescriptions[1] = vk::VertexInputAttributeDescription(
-            1,
-            0,
-            vk::Format::eR32G32B32Sfloat,
-            offsetof(Vertex, color)
-            );
+        // Location 1: Normal (vec3) - Moved from Location 2
+        attributeDescriptions[1].setBinding(0)
+                                .setLocation(1)
+                                .setFormat(vk::Format::eR32G32B32Sfloat)
+                                .setOffset(offsetof(Vertex, normal));
 
-        // Normal: location 2
-        attributeDescriptions[2] = vk::VertexInputAttributeDescription(
-            2,
-            0,
-            vk::Format::eR32G32B32Sfloat,
-            offsetof(Vertex, normal)
-            );
+        // Location 2: UV (vec2) - Moved from Location 3
+        attributeDescriptions[2].setBinding(0)
+                                .setLocation(2)
+                                .setFormat(vk::Format::eR32G32Sfloat)
+                                .setOffset(offsetof(Vertex, uv));
 
-        // TexCoord: location 3 (R32G32 is vec2)
-        attributeDescriptions[3] = vk::VertexInputAttributeDescription(
-            3,
-            0,
-            vk::Format::eR32G32Sfloat,
-            offsetof(Vertex, uv)
-            );
+        // Location 3: Color (vec3) - Moved from Location 1
+        attributeDescriptions[3].setBinding(0)
+                                .setLocation(3)
+                                .setFormat(vk::Format::eR32G32B32Sfloat)
+                                .setOffset(offsetof(Vertex, color));
 
         return attributeDescriptions;
     }
@@ -75,7 +67,3 @@ template <> struct hash<Vertex> {
     }
 };
 } // namespace std
-
-// Sample data containers
-// inline std::vector<Vertex> vertices;
-// inline std::vector<uint32_t> indices;

@@ -171,5 +171,5 @@ Abstraction: Wrap these into classes like Shader, Buffer, and Texture to make th
 2. Render graph + deferred rendering → 核心 architecture
 3. Depth reconstruct + reversed Z → optimization insight
 4. Optional: 簡化 PBR → pipeline integration
-
+5. I intend to have defer rendering + ssao and optimize it with render graph + reduce memory bandwidth and reconstruct position from depth
 > 如果面試時間有限，做到第 3 步就足夠殺了。

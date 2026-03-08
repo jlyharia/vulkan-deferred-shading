@@ -18,21 +18,22 @@ App::App(int width, int height, const char *title) : width_(width), height_(heig
 }
 
 App::~App() {
-    // Wait for GPU to be idle before destroying anything
-    if (vulkanContext_)
-        vkDeviceWaitIdle(vulkanContext_->getDevice());
+    if (vulkanContext_ && vulkanContext_->getDevice()) {
+        vulkanContext_->getDevice().waitIdle();
+    }
 
-    renderObjects_.clear(); // Releases references in the vector
-    sponzaModel_.reset(); // Releases the shared_ptr to the model
-    assetManager_.reset(); // If it holds any staging buffers
-    userInterface_.reset();
-    renderer_.reset(); // 5. Destroys sync objects/cmd buffers
-    graphicsPipeline_.reset(); // 4. Destroys pipeline
-    swapchain_.reset(); // 2. Destroys framebuffers/image views
-    vulkanContext_.reset(); // 1. Finally, destroys Device and Instance
+    // You don't NEED to call .reset() on everything anymore.
+    // C++ will now destroy them in the correct order automatically:
+    // 1. UI, RenderObjects, SponzaModel (Releases references)
+    // 2. Asset/Texture Managers (Releases VMA memory)
+    // 3. GraphicsPipeline
+    // 4. Renderer (Releases Pools/Layouts)
+    // 5. Swapchain
+    // 6. VulkanContext (Destroy Device/Instance)
 
-    if (window_)
+    if (window_) {
         glfwDestroyWindow(window_);
+    }
     glfwTerminate();
 }
 
@@ -64,20 +65,22 @@ void App::initVulkan() {
 
     // 1. Create Renderer first to get the Command Pool
     renderer_ = std::make_unique<Renderer>(*vulkanContext_, *swapchain_, window_);
-
     renderer_->createDescriptorSetLayout();
+
+    textureManager_ = std::make_unique<TextureManager>(*vulkanContext_);
     // 2. Create AssetManager using the pool from the renderer
-    assetManager_ = std::make_unique<AssetManager>(*vulkanContext_, renderer_->getCommandPool());
+    assetManager_ = std::make_unique<AssetManager>(*vulkanContext_, vulkanContext_->getMainCommandPool(),
+                                                   *textureManager_, *renderer_);
 
     // 3. Create Pipeline using the Layout from the Renderer
     graphicsPipeline_ = std::make_unique<GraphicsPipeline>(
-        *vulkanContext_, *swapchain_, renderer_->getDescriptorSetLayout()
+        *vulkanContext_, *swapchain_, renderer_->getDescriptorSetLayouts()
         );
 
     userInterface_ = std::make_unique<UserInterface>(*vulkanContext_, *swapchain_, window_);
 
     // 4. Initialize Renderer internal buffers/sets with the Pipeline Layout
-    renderer_->initResources(graphicsPipeline_->getPipelineLayout());
+    renderer_->initResources();
 
     // 5. Load your objects (calls assetManager->loadModel internally)
     loadScene();
@@ -88,12 +91,13 @@ void App::loadScene() {
     sponzaModel_ = std::make_shared<Model>(vulkanContext_->getVmaAllocator());
     sponzaModel_->loadFromFile(
         // "assets/model/basic/sphere.glb"
-        "assets/model/sponza/glTF/Sponza.gltf"
+        "assets/model/sponza/glTF/Sponza.gltf",
+        *textureManager_, *renderer_
         );
 
     // Upload geometry to GPU memory
     sponzaModel_->uploadToGPU(vulkanContext_->getDevice(), vulkanContext_->getGraphicsQueue(),
-                              renderer_->getCommandPool());
+                              vulkanContext_->getMainCommandPool());
 
     // 2. Create the RenderObject (The Instance)
     RenderObject sponzaInstance;
@@ -102,7 +106,9 @@ void App::loadScene() {
 
     // Sponza is often modeled in centimeters; you might need to scale it down
     sponzaInstance.transform.setScale(glm::vec3(1.0f));
-    sponzaInstance.transform.setRotation(-90.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+    // float rot = 0.1f;
+    sponzaInstance.transform.setRotation(glm::vec3(90.0f, 0.0f, 0.0f));
+    sponzaInstance.transform.setPosition(glm::vec3(7.0f, 1.5f, -4.0f));
     sponzaInstance.transform.updateMatrix();
 
     // 3. Add to the render list
@@ -126,6 +132,7 @@ void App::mainLoop() {
         // 2. UI Phase
         userInterface_->beginFrame();
         renderUI(); // Call our extracted function
+        userInterface_->drawCameraSettings(camera);
         userInterface_->endFrame();
 
         // 3. Render Phase
@@ -178,7 +185,8 @@ void App::drawFrame() {
                              framebufferResized_,
                              camera,
                              *userInterface_,
-                             renderObjects_);
+                             renderObjects_,
+                             graphicsPipeline_->getPipelineLayout());
     } catch (const std::runtime_error &e) {
         // If the renderer encounters VK_ERROR_OUT_OF_DATE_KHR, it throws
         renderer_->recreateSwapChain();

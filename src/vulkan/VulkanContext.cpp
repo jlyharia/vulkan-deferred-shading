@@ -15,31 +15,6 @@ const std::vector<const char *> VulkanContext::deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
-// VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
-//     : window_(window), validation_(std::make_unique<Validation>(enableValidation)) {
-//
-//     // 1. Initialize global dispatcher with the base loader
-//     VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
-//
-//     if (validation_->isEnabled() && !validation_->checkLayerSupport()) {
-//         throw std::runtime_error("Validation layers requested, but not available!");
-//     }
-//
-//     createInstance();
-//
-//     // 2. Patch global dispatcher with Instance pointers
-//     VULKAN_HPP_DEFAULT_DISPATCHER.init(instance_);
-//
-//     if (validation_->isEnabled()) {
-//         setupDebugMessenger();
-//     }
-//
-//     createSurface();
-//     pickPhysicalDevice();
-//     createLogicalDevice();
-//     initVmaAllocator();
-// }
-
 VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
     : window_(window), validation_(std::make_unique<Validation>(enableValidation)) {
 
@@ -64,20 +39,27 @@ VulkanContext::VulkanContext(GLFWwindow *window, bool enableValidation)
 
     createSurface();
     pickPhysicalDevice();
-    createLogicalDevice();
+    createLogicalDevice(); // This is where graphicsQueueFamilyIndex_ is set
+    // --- NOW it is safe to create pools ---
+    createCommandPools();
     initVmaAllocator();
-    std::cerr<< "[Constructor] VulkanContext initialized successfully." << std::endl;
+    std::cerr << "[Constructor] VulkanContext initialized successfully." << std::endl;
 }
 
 VulkanContext::~VulkanContext() {
     std::cerr << "[Destructor] VulkanContext starting..." << std::endl;
     if (vmaAllocator_) {
         vmaDestroyAllocator(vmaAllocator_);
+        vmaAllocator_ = nullptr;
     }
     vkDestroySurfaceKHR(instance_, surface_, nullptr);
+
     std::cerr << "[Destructor] VulkanContext-vkDestroySurfaceKHR..." << std::endl;
     if (this->vkDevice_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(vkDevice_);
+        vkDevice_.destroyCommandPool(mainCommandPool_);
+        vkDevice_.destroyCommandPool(transferCommandPool_);
+
         vkDestroyDevice(vkDevice_, nullptr);
         std::cerr << "[Destructor] VulkanContext-vkDevice_..." << std::endl;
     }
@@ -144,7 +126,7 @@ void VulkanContext::pickPhysicalDevice() {
 
     if (candidates.rbegin()->first > 0) {
         physicalDevice_ = candidates.rbegin()->second;
-
+        queueIndices_ = findQueueFamilies(physicalDevice_);
         vk::PhysicalDeviceProperties props = physicalDevice_.getProperties();
         std::cout << "-- Selected GPU: " << props.deviceName.data()
             << " (Score: " << candidates.rbegin()->first << ")" << std::endl;
@@ -176,10 +158,11 @@ int VulkanContext::rateDeviceSuitability(vk::PhysicalDevice device) {
 }
 
 void VulkanContext::createLogicalDevice() {
-    QueueFamilyIndices indices = findQueueFamilies(physicalDevice_);
+    // queueIndices_ = findQueueFamilies(physicalDevice_);
 
     std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
-    std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+    std::set<uint32_t> uniqueQueueFamilies =
+        {queueIndices_.graphicsFamily.value(), queueIndices_.presentFamily.value()};
 
     float queuePriority = 1.0f;
     for (uint32_t queueFamily : uniqueQueueFamilies) {
@@ -217,8 +200,8 @@ void VulkanContext::createLogicalDevice() {
     // 3. Final Patch: Initialize global dispatcher with Device pointers for speed
     VULKAN_HPP_DEFAULT_DISPATCHER.init(vkDevice_);
 
-    graphicsQueue_ = vkDevice_.getQueue(indices.graphicsFamily.value(), 0);
-    presentQueue_ = vkDevice_.getQueue(indices.presentFamily.value(), 0);
+    graphicsQueue_ = vkDevice_.getQueue(queueIndices_.graphicsFamily.value(), 0);
+    presentQueue_ = vkDevice_.getQueue(queueIndices_.presentFamily.value(), 0);
 }
 
 bool VulkanContext::isDeviceSuitable(vk::PhysicalDevice device) const {
@@ -228,8 +211,7 @@ bool VulkanContext::isDeviceSuitable(vk::PhysicalDevice device) const {
     bool swapChainAdequate = false;
     if (extensionsSupported) {
         // Note: Check if your SwapChain class also uses the global dispatcher!
-        swapChainAdequate = SwapChain::isDeviceAdequate(static_cast<VkPhysicalDevice>(device),
-                                                        static_cast<VkSurfaceKHR>(surface_));
+        swapChainAdequate = SwapChain::isDeviceAdequate(device,surface_);
     }
 
     return indices.isComplete() && extensionsSupported && swapChainAdequate;
@@ -345,4 +327,18 @@ void VulkanContext::initVmaAllocator() {
     VmaAllocatorInfo info{};
     vmaGetAllocatorInfo(vmaAllocator_, &info);
 
+}
+
+void VulkanContext::createCommandPools() {
+    uint32_t graphicsIndex = queueIndices_.graphicsFamily.value(); // Main: optimized for frequent resetting
+    vk::CommandPoolCreateInfo mainInfo = vk::CommandPoolCreateInfo()
+                                         .setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer)
+                                         .setQueueFamilyIndex(graphicsIndex);
+    mainCommandPool_ = this->getDevice().createCommandPool(mainInfo);
+
+    // Transfer: optimized for one-off tasks (industrial 'Transient' flag)
+    vk::CommandPoolCreateInfo transferInfo = vk::CommandPoolCreateInfo()
+                                             .setFlags(vk::CommandPoolCreateFlagBits::eTransient)
+                                             .setQueueFamilyIndex(graphicsIndex);
+    transferCommandPool_ = this->getDevice().createCommandPool(transferInfo);
 }

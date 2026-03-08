@@ -1,6 +1,7 @@
 #include "UserInterface.hpp"
 
 #include "common/config.hpp"
+#include "scene/Camera.hpp"
 #include "vulkan/swap_chain.hpp"
 
 #include <iostream>
@@ -134,4 +135,46 @@ void UserInterface::createDescriptorPool() {
 
     // This creates the pool using your device handle from the context
     imguiPool_ = context_.getDevice().createDescriptorPool(poolInfo);
+}
+
+void UserInterface::drawCameraSettings(Camera &camera) {
+    ImGui::Begin("Camera Controller");
+
+    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::DragFloat3("Position", &camera.position.x, 0.1f);
+
+        // Track changes to Yaw/Pitch
+        bool changed = false;
+        if (ImGui::SliderFloat("Yaw", &camera.yaw, -180.0f, 180.0f))
+            changed = true;
+        if (ImGui::SliderFloat("Pitch", &camera.pitch, -89.0f, 89.0f))
+            changed = true;
+
+        if (changed) {
+            camera.updateCameraVectors();
+        }
+
+        // --- Added Forward Vector Display ---
+        ImGui::Separator();
+        ImGui::Text("Forward Vector:");
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f),
+                           "X: %.3f  Y: %.3f  Z: %.3f",
+                           camera.forward.x, camera.forward.y, camera.forward.z);
+        // ------------------------------------
+    }
+
+    if (ImGui::CollapsingHeader("Settings")) {
+        ImGui::SliderFloat("Movement Speed", &camera.movementSpeed, 0.1f, 20.0f);
+        ImGui::SliderFloat("Mouse Sensitivity", &camera.mouseSensitivity, 0.01f, 1.0f);
+        ImGui::SliderFloat("Field of View", &camera.fov, 30.0f, 110.0f);
+    }
+
+    if (ImGui::Button("Reset to Center")) {
+        camera.position = glm::vec3(0.0f, 2.0f, 0.0f);
+        camera.yaw = 0.0f;
+        camera.pitch = 0.0f;
+        camera.rotate(0, 0);
+    }
+
+    ImGui::End();
 }

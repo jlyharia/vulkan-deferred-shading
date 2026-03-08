@@ -5,62 +5,103 @@
 #pragma once
 #include "common/VulkanInclude.hpp"
 
-class VulkanUtils {
-public:
-    static void createBuffer(
-        VmaAllocator allocator,
-        vk::DeviceSize size,
-        vk::BufferUsageFlags usage,
-        VmaMemoryUsage vmaUsage,
-        vk::Buffer &buffer,
-        VmaAllocation &allocation,
-        VmaAllocationCreateFlags vmaFlags = 0) {
-        VkBufferCreateInfo bufferInfo = vk::BufferCreateInfo()
-                                        .setSize(size)
-                                        .setUsage(usage)
-                                        .setSharingMode(vk::SharingMode::eExclusive);
+namespace vk_util {
 
-        VmaAllocationCreateInfo allocInfo = {};
-        allocInfo.usage = vmaUsage;
-        allocInfo.flags = vmaFlags;
+// 1. Generic Buffer Creation (VMA)
+void createBuffer(
+    VmaAllocator allocator,
+    vk::DeviceSize size,
+    vk::BufferUsageFlags usage,
+    VmaMemoryUsage vmaUsage,
+    vk::Buffer &buffer,
+    VmaAllocation &allocation,
+    VmaAllocationCreateFlags vmaFlags = 0);
 
-        VkBuffer rawBuffer;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &rawBuffer, &allocation, nullptr) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create buffer via VMA!");
-        }
-        buffer = rawBuffer;
-    }
+void copyBuffer(
+    vk::Device device,
+    vk::CommandPool commandPool,
+    vk::Queue queue,
+    vk::Buffer srcBuffer,
+    vk::Buffer dstBuffer,
+    vk::DeviceSize size);
+// 2. Generic Image Creation (VMA)
+void createImage(
+    VmaAllocator allocator,
+    uint32_t width,
+    uint32_t height,
+    vk::Format format,
+    vk::ImageTiling tiling,
+    vk::ImageUsageFlags usage,
+    VmaMemoryUsage vmaUsage,
+    vk::Image &image,
+    VmaAllocation &allocation);
 
-    static void copyBuffer(
-        vk::Device device,
-        vk::CommandPool commandPool,
-        vk::Queue queue,
-        vk::Buffer srcBuffer,
-        vk::Buffer dstBuffer,
-        vk::DeviceSize size) {
+// 3. Image Layout Transition (Essential for Textures)
+void transitionImageLayout(
+    vk::Device device,
+    vk::CommandPool commandPool,
+    vk::Queue graphicsQueue,
+    vk::Image image,
+    vk::Format format,
+    vk::ImageLayout oldLayout,
+    vk::ImageLayout newLayout);
 
-        vk::CommandBufferAllocateInfo allocInfo(commandPool, vk::CommandBufferLevel::ePrimary, 1);
-        auto cmd = device.allocateCommandBuffers(allocInfo)[0];
+// 4. Copy Buffer to Image
+void copyBufferToImage(
+    vk::Device device,
+    vk::CommandPool commandPool,
+    vk::Queue graphicsQueue,
+    vk::Buffer buffer,
+    vk::Image image,
+    uint32_t width,
+    uint32_t height);
 
-        cmd.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
-        cmd.copyBuffer(srcBuffer, dstBuffer, vk::BufferCopy(0, 0, size));
-        cmd.end();
+vk::ImageView createImageView(
+    vk::Device device,
+    vk::Image image,
+    vk::Format format,
+    vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor
+    );
 
-        // 1. Create the Fence
-        vk::FenceCreateInfo fenceInfo{};
-        auto fence = device.createFence(fenceInfo);
+// 5. One-Time Command Helper (Internal use)
+vk::CommandBuffer beginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool);
+void endSingleTimeCommands(vk::Device device, vk::CommandPool commandPool, vk::Queue queue,
+                           vk::CommandBuffer commandBuffer);
 
-        // 2. Submit with the Fence
-        vk::SubmitInfo submitInfo{};
-        submitInfo.setCommandBuffers(cmd);
-        queue.submit(submitInfo, fence); // The fence will be "signaled" when done
+template <typename T>
+void uploadToDeviceBuffer(
+    const VmaAllocator allocator,
+    const vk::Device device,
+    const vk::Queue queue,
+    const vk::CommandPool commandPool,
+    const std::vector<T> &data,
+    const vk::BufferUsageFlags usage,
+    vk::Buffer &outBuffer,
+    VmaAllocation &outAllocation) {
+    const vk::DeviceSize bufferSize = sizeof(T) * data.size();
 
-        // 3. Wait for the Fence specifically
-        // We wait indefinitely (UINT64_MAX) until the copy is finished
-        auto result = device.waitForFences(fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+    // 1. Staging Buffer (CPU Visible)
+    vk::Buffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+    createBuffer(allocator, bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+                 VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAlloc);
 
-        // 4. Cleanup
-        device.destroyFence(fence);
-        device.freeCommandBuffers(commandPool, cmd);
-    }
-};
+    // 2. Map and Copy
+    void *mappedData;
+    vmaMapMemory(allocator, stagingAlloc, &mappedData);
+    memcpy(mappedData, data.data(), static_cast<size_t>(bufferSize));
+    vmaUnmapMemory(allocator, stagingAlloc);
+
+    // 3. GPU Buffer (Device Local)
+    createBuffer(allocator, bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage,
+                 VMA_MEMORY_USAGE_GPU_ONLY, outBuffer, outAllocation);
+
+    // 4. Transfer Command
+    copyBuffer(device, commandPool, queue, stagingBuffer, outBuffer, bufferSize);
+
+    // 5. Cleanup
+    vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
+}
+
+
+}

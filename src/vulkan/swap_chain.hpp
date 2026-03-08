@@ -77,16 +77,16 @@ private:
     void createDepthResources();
 
     // Helper methods
-    [[nodiscard]] vk::ImageView createImageView(vk::Image image, vk::Format format,
-                                                vk::ImageAspectFlags aspectFlags) const;
+    // [[nodiscard]] vk::ImageView createImageView(vk::Image image, vk::Format format,
+    //                                             vk::ImageAspectFlags aspectFlags) const;
     [[nodiscard]] vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities) const;
     vk::Format findDepthFormat();
-    void createImage(uint32_t width,
-                     uint32_t height,
-                     vk::Format format,
-                     vk::ImageTiling tiling,
-                     vk::ImageUsageFlags usage,
-                     VmaMemoryUsage vmaUsage,
-                     vk::Image &image,
-                     VmaAllocation &allocation) const;
+    // void createImage(uint32_t width,
+    //                  uint32_t height,
+    //                  vk::Format format,
+    //                  vk::ImageTiling tiling,
+    //                  vk::ImageUsageFlags usage,
+    //                  VmaMemoryUsage vmaUsage,
+    //                  vk::Image &image,
+    //                  VmaAllocation &allocation) const;
 };

@@ -10,6 +10,7 @@
 #include "../scene/Camera.hpp"
 #include "core/AssetManager.hpp"
 #include "scene/RenderObject.hpp"
+#include "scene/TextureManager.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 class UserInterface;
@@ -74,20 +75,31 @@ private:
     const char *title_;
     Camera camera;
 
-    // 1. Foundation: Declare FIRST, destroyed LAST
     GLFWwindow *window_ = nullptr;
+    // 1. Core: Must be destroyed ABSOLUTE LAST
     std::unique_ptr<VulkanContext> vulkanContext_;
 
-    // 2. Resources: Depends on Context
+    // 2. The Foundation: Owns the windows/buffers
     std::unique_ptr<SwapChain> swapchain_;
-    std::unique_ptr<GraphicsPipeline> graphicsPipeline_;
-
-    // 3. Workers: Depends on everything above. Declare LAST, destroyed FIRST
     std::unique_ptr<Renderer> renderer_;
-    std::unique_ptr<UserInterface> userInterface_;
-    std::vector<RenderObject> renderObjects_;
+    // 3. Resource Management: Owns the actual GPU Memory (VMA)
+    // Must die before Context, but AFTER the objects that use the memory
+    std::unique_ptr<GraphicsPipeline> graphicsPipeline_;
+    std::unique_ptr<TextureManager> textureManager_;
     std::unique_ptr<AssetManager> assetManager_;
+
+    // 4. Descriptor & Command Logic: Owns the Pools
+    // If this dies before the models, the models can't free their DescriptorSets!
+
+
+    // 5. The State: Depends on DescriptorSetLayouts (from Renderer) and Swapchain
+
+
+    // 6. High Level objects: Depends on everything (Destroyed FIRST)
+    std::unique_ptr<UserInterface> userInterface_;
     std::shared_ptr<Model> sponzaModel_;
+    std::vector<RenderObject> renderObjects_;
+
     void initWindow();
 
     void mainLoop();
