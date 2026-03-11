@@ -8,75 +8,61 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 
-GltfLoader::ModelData GltfLoader::loadFromFile(const std::string &path, const bool isBinary) const {
+ModelData GltfLoader::loadFromFile(const std::string &path, const bool isBinary) const {
     tinygltf::Model input;
     tinygltf::TinyGLTF context;
     std::string warn, err;
     ModelData modelData;
     modelData.success = false;
 
-    // 1. Path processPrimitive
-    // This ensures we don't even try to load if the file is missing from your symlinked assets
     if (!std::filesystem::exists(path)) {
-        std::cerr << "[glTF Err] File does not exist at: " << path << std::endl;
-        std::cerr << "[glTF Err] Check if your 'assets' symlink in cmake-build-debug is broken." << std::endl;
+        std::cerr << "[glTF Err] Path invalid: " << path << std::endl;
         return modelData;
     }
-    std::cout << "[Debug] Attempting to load glTF from: "
-        << std::filesystem::absolute(path) << std::endl;
-    std::cout << "[Debug] Looking for .bin in: "
-        << std::filesystem::absolute(path).parent_path() << std::endl;
 
-    // 2. Disable internal image loading
-    // Since you don't have the stb_image callback set up yet, this prevents a crash
-    // context.SetImageLoader(nullptr, nullptr);
-    // context.SetImageLoader([](tinygltf::Image *, const int, std::string *,
-    //                           std::string *, int, int, const unsigned char *,
-    //                           int, void *) {
-    // return true;
-    // }, nullptr);
-    // 2. RE-ENABLE Image Loading
-    // We use tinygltf's default loader (stb_image) to get the raw pixels
-    // but we won't upload them to Vulkan yet.
+    // 1. Load raw file data
     const bool fileLoaded = isBinary
                                 ? context.LoadBinaryFromFile(&input, &err, &warn, path)
                                 : context.LoadASCIIFromFile(&input, &err, &warn, path);
-
-    // 3. LOAD TEXTURES FIRST
-    // This populates output.textures via your TextureManager
-    loadImages(input, modelData);
 
     if (!warn.empty())
         std::cout << "[glTF Warn]: " << warn << std::endl;
     if (!err.empty())
         std::cerr << "[glTF Err]: " << err << std::endl;
-
-    if (!fileLoaded) {
-        std::cerr << "[glTF Err] Failed to parse glTF: " << path << std::endl;
+    if (!fileLoaded)
         return modelData;
-    }
 
-    modelData.materialToTexture.clear();
+    // 2. Process Textures (Delegated to helper)
+    loadImages(input, modelData);
+
+    // 3. Process Materials (PBR Refactor)
+    modelData.materials.clear();
     for (size_t i = 0; i < input.materials.size(); i++) {
         const auto &gltfMat = input.materials[i];
+        MaterialInfo info;
+        info.name = gltfMat.name;
 
-        // We specifically want the Base Color (Diffuse) map
-        const int baseColorTexIndex = gltfMat.pbrMetallicRoughness.baseColorTexture.index;
+        // Map glTF indices to our uploaded texture indices
+        if (gltfMat.pbrMetallicRoughness.baseColorTexture.index != -1)
+            info.baseColorIdx = input.textures[gltfMat.pbrMetallicRoughness.baseColorTexture.index].source;
 
-        if (baseColorTexIndex != -1) {
-            // glTF Texture index -> glTF Image source index
-            const int imageIndex = input.textures[baseColorTexIndex].source;
-            modelData.materialToTexture[static_cast<int>(i)] = imageIndex;
-        } else {
-            // No texture for this material (use -1 to trigger white fallback later)
-            modelData.materialToTexture[static_cast<int>(i)] = -1;
-        }
+        if (gltfMat.normalTexture.index != -1)
+            info.normalIdx = input.textures[gltfMat.normalTexture.index].source;
+
+        // Capture PBR factors and alpha state
+        auto &pbr = gltfMat.pbrMetallicRoughness;
+        info.baseColorFactor = glm::make_vec4(pbr.baseColorFactor.data());
+        info.metallicFactor = static_cast<float>(pbr.metallicFactor);
+        info.roughnessFactor = static_cast<float>(pbr.roughnessFactor);
+        info.alphaCutoff = static_cast<float>(gltfMat.alphaCutoff);
+        info.doubleSided = gltfMat.doubleSided;
+        info.isTransparent = (gltfMat.alphaMode == "BLEND");
+
+        modelData.materials[static_cast<int>(i)] = info;
     }
-    // 4. SCENE TRAVERSAL
-    // Sponza often has many nodes; we must traverse starting from the default scene
-    const tinygltf::Scene &scene = input.scenes[input.defaultScene > -1 ? input.defaultScene : 0];
 
-    // Optimization: Pre-allocate memory to handle Sponza's high vertex count
+    // 4. Geometry Traversal
+    const tinygltf::Scene &scene = input.scenes[input.defaultScene > -1 ? input.defaultScene : 0];
     modelData.vertices.reserve(200000);
     modelData.indices.reserve(200000);
 
@@ -84,18 +70,7 @@ GltfLoader::ModelData GltfLoader::loadFromFile(const std::string &path, const bo
         processNode(input, input.nodes[nodeIdx], modelData, glm::mat4(1.0f));
     }
 
-    // 6. Success Check
-    if (modelData.vertices.empty()) {
-        std::cerr << "[glTF Err] Logic error: Loaded file but found 0 vertices. Check processNode recursion." <<
-            std::endl;
-    } else {
-        modelData.success = true;
-        std::cout << "[glTF Success] " << path << ":" << std::endl;
-        std::cout << "   - Vertices: " << modelData.vertices.size() << std::endl;
-        std::cout << "   - Primitives: " << modelData.primitives.size() << std::endl;
-        std::cout << "   - Textures: " << modelData.textures.size() << std::endl;
-    }
-
+    modelData.success = !modelData.vertices.empty();
     return modelData;
 }
 
@@ -156,10 +131,14 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
     const float *bufferPos = nullptr;
     const float *bufferNormals = nullptr;
     const float *bufferTexCoords = nullptr;
+    const float *bufferTangents = nullptr;
     int posStride = 0, normStride = 0, texStride = 0;
 
     uint32_t vertexStart = static_cast<uint32_t>(output.vertices.size());
 
+    for (auto &[name, index] : primitive.attributes) {
+        std::cout << "[Attr] " << name << std::endl;
+    }
     // --- 1. Extract Attributes ---
     if (primitive.attributes.contains("POSITION")) {
         const tinygltf::Accessor &acc = input.accessors[primitive.attributes.at("POSITION")];
@@ -175,6 +154,8 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
         bufferNormals = reinterpret_cast<const float *>(&(input.buffers[view.buffer].data[
             acc.byteOffset + view.byteOffset]));
         normStride = acc.ByteStride(view) / sizeof(float);
+    } else {
+        std::cerr << "[GltfLoader::Missing Normal]" << std::endl;
     }
 
     if (primitive.attributes.contains("TEXCOORD_0")) {
@@ -183,6 +164,14 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
         bufferTexCoords = reinterpret_cast<const float *>(&(input.buffers[view.buffer].data[
             acc.byteOffset + view.byteOffset]));
         texStride = acc.ByteStride(view) / sizeof(float);
+    }
+
+    if (primitive.attributes.contains("TANGENT")) {
+        const tinygltf::Accessor &acc = input.accessors[primitive.attributes.at("TANGENT")];
+        const tinygltf::BufferView &view = input.bufferViews[acc.bufferView];
+        bufferTangents = reinterpret_cast<const float *>(&(input.buffers[view.buffer].data[
+            acc.byteOffset + view.byteOffset]));
+        // Note: Tangent stride is usually 4 floats (vec4)
     }
 
     // --- NEW: Material Factor Capture ---
@@ -200,7 +189,7 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
         // DEBUG: Uncomment this to verify the arches are actually being assigned a color
         if (baseColorFactor.r < 1.0f) {
             std::cout << "[GltfLoader] Material " << primitive.material << " Factor: "
-                      << baseColorFactor.r << ", " << baseColorFactor.g << std::endl;
+                << baseColorFactor.r << ", " << baseColorFactor.g << std::endl;
         }
     }
 
@@ -233,6 +222,16 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
         // Color (Location 3)
         // This MUST be set to the baseColorFactor for the arches to show stone color
         vert.color = baseColorFactor;
+        if (primitive.material == 5) // or whichever arch material
+        {
+            std::cout << "UV: " << vert.uv.x << ", " << vert.uv.y << std::endl;
+        }
+
+        if (bufferTangents) {
+            vert.tangent = glm::make_vec4(&bufferTangents[v * 4]);
+            // Most glTF tangents are vec4; use the normalMatrix to rotate them
+            vert.tangent = glm::vec4(normalMatrix * glm::vec3(vert.tangent), vert.tangent.w);
+        }
 
         output.vertices.push_back(vert);
     }
@@ -263,16 +262,35 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
 }
 
 void GltfLoader::loadImages(const tinygltf::Model &model, ModelData &output) const {
-    std::cout << "[glTF] Uploading " << model.images.size() << " textures to GPU..." << std::endl;
+    if (model.images.empty())
+        return;
+
+    std::cout << "[glTF] Scanning " << model.images.size() << " textures..." << std::endl;
+
+    // 1. Identify Data Maps (Normals, Metallic, Roughness)
+    std::vector<bool> isDataMap(model.images.size(), false);
+    for (const auto &mat : model.materials) {
+        // Check Normal Map slot
+        if (mat.normalTexture.index != -1) {
+            int imageIdx = model.textures[mat.normalTexture.index].source;
+            if (imageIdx != -1)
+                isDataMap[imageIdx] = true;
+        }
+        // Check Metallic/Roughness slot
+        if (mat.pbrMetallicRoughness.metallicRoughnessTexture.index != -1) {
+            int imageIdx = model.textures[mat.pbrMetallicRoughness.metallicRoughnessTexture.index].source;
+            if (imageIdx != -1)
+                isDataMap[imageIdx] = true;
+        }
+    }
+
+    // 2. Upload to GPU
     output.textures.resize(model.images.size());
     for (size_t i = 0; i < model.images.size(); i++) {
-        const auto &gltfImage = model.images[i];
+        bool isColor = !isDataMap[i]; // Data maps are NOT sRGB
+        output.textures[i] = textureManager_.loadTextureFromGltf(model.images[i], isColor);
 
-        // 2. Load and place specifically at index 'i'
-        // This ensures output.textures[i] corresponds to tinygltf image index 'i'
-        output.textures[i] = textureManager_.loadTextureFromGltf(gltfImage);
-
-        // Optional: Debugging log to track progress
-        std::cout << "  [Texture " << i << "] " << gltfImage.name << " loaded." << std::endl;
+        std::cout << "  [Tex " << i << "] " << (isColor ? "sRGB" : "Unorm")
+            << " | " << model.images[i].name << std::endl;
     }
 }

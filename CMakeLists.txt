@@ -87,6 +87,7 @@ add_executable(${TARGET_NAME}
         src/scene/TextureManager.hpp
         src/vulkan/VulkanUtils.cpp
         src/common/Material.hpp
+        src/common/PushConstantConstant.hpp
 )
 
 # ------------------------------------------------------------

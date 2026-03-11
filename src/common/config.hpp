@@ -19,3 +19,9 @@ inline constexpr float DEFAULT_GUI_FONT = 3.0f;
 inline constexpr uint32_t DEFAULT_VK_API_VERSION = VK_API_VERSION_1_3;
 
 }
+
+
+namespace DescriptorSets {
+constexpr uint32_t GLOBAL_SET = 0; // Set 0: Camera, Time, Lights
+constexpr uint32_t MATERIAL_SET = 1; // Set 1: Albedo, Normal, MR
+}

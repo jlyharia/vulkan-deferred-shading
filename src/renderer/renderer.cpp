@@ -14,9 +14,9 @@
 #include "../common/Vertex.hpp"
 #include "common/config.hpp"
 #include "../scene/Model.hpp"
+#include "common/PushConstantConstant.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/swap_chain.hpp"
-#include "vulkan/VulkanUtils.hpp"
 
 
 // The C++ Bindings Header
@@ -173,7 +173,7 @@ void Renderer::renderScene(const vk::CommandBuffer cmd,
         // Bind Global Uniforms (Camera View/Proj) - Done ONCE per frame
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                activePipelineLayout,
-                               0, // This is Set 0 in your shader
+                               DescriptorSets::GLOBAL_SET, // This is Set 0 in your shader
                                {descriptorSets_[currentFrame]},
                                {});
 
@@ -181,14 +181,6 @@ void Renderer::renderScene(const vk::CommandBuffer cmd,
         for (const auto &[model, transform, name] : objects) {
             if (!model)
                 continue;
-
-            // 1. Push the Model Matrix (Transform) to the Shader
-            cmd.pushConstants<glm::mat4>(
-                activePipelineLayout,
-                vk::ShaderStageFlagBits::eVertex,
-                0,
-                transform.modelMatrix
-                );
 
             // 2. Bind the Model's GPU Buffers
             vk::DeviceSize offsets[] = {0};
@@ -198,35 +190,35 @@ void Renderer::renderScene(const vk::CommandBuffer cmd,
             // 3. DRAW SUBMESHES (The Material Loop)
             const auto &materials = model->getMaterials();
 
-            // if (!materials.empty() && materials[0].textureSet) {
-            //     cmd.bindDescriptorSets(
-            //         vk::PipelineBindPoint::eGraphics,
-            //         activePipelineLayout,
-            //         1,
-            //         1,
-            //         &materials[0].textureSet, // Always bind the first material
-            //         0, nullptr
-            //     );
-            // }
             for (const auto &submesh : model->getSubmeshes()) {
+                // --- 1. RESOLVE MATERIAL ---
+                const auto &mat = (submesh.materialIndex >= 0)
+                                      ? materials[submesh.materialIndex]
+                                      : defaultMaterial;
 
-                // --- NEW: BIND MATERIAL (SET 1) ---
-                if (submesh.materialIndex >= 0 && submesh.materialIndex < materials.size()) {
-                    const auto &mat = materials[submesh.materialIndex];
+                // --- 2. UPDATE PUSH CONSTANTS (Matrix + Color) ---
+                // We create a temporary struct to push everything at once
+                MeshPushConstants constants;
+                constants.modelMatrix = transform.modelMatrix;
+                constants.baseColorFactor = mat.baseColorFactor; // The "Lion Fix"
 
-                    // Only bind if a valid descriptor set exists for this material
-                    if (mat.textureSet) {
-                        cmd.bindDescriptorSets(
-                            vk::PipelineBindPoint::eGraphics,
-                            activePipelineLayout,
-                            1, // This is Set 1 in your shader
-                            1, // Binding 1 set
-                            &mat.textureSet, // Pointer to the handle
-                            0, nullptr // No dynamic offsets
-                            );
-                    }
+                cmd.pushConstants<MeshPushConstants>(
+                    activePipelineLayout,
+                    vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+                    0,
+                    constants
+                    );
+
+                // --- 3. BIND MATERIAL (SET 1) ---
+                if (mat.textureSet) {
+                    cmd.bindDescriptorSets(
+                        vk::PipelineBindPoint::eGraphics,
+                        activePipelineLayout,
+                        DescriptorSets::MATERIAL_SET, // Set 1
+                        {mat.textureSet},
+                        {}
+                        );
                 }
-
                 // 4. Draw the specific index range for this material
                 cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
                 // cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
@@ -251,7 +243,8 @@ vk::RenderingAttachmentInfo Renderer::getPrimaryDepthAttachment() const {
     depthAttachment.setImageView(swapChain_.getDepthImageView())
                    .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
                    .setLoadOp(vk::AttachmentLoadOp::eClear)
-                   .setStoreOp(vk::AttachmentStoreOp::eDontCare)
+                   // .setStoreOp(vk::AttachmentStoreOp::eDontCare)
+                   .setStoreOp(vk::AttachmentStoreOp::eStore)
                    .setClearValue(vk::ClearDepthStencilValue(1.0f, 0));
     return depthAttachment;
 }
@@ -381,7 +374,7 @@ void Renderer::drawFrame(const vk::Pipeline pipeline,
     currentFrame = (currentFrame + 1) % engineConfig::MAX_FRAMES_IN_FLIGHT;
 }
 
-void Renderer::recreateSwapChain() {
+void Renderer::recreateSwapChain() const {
     // 1. Handle Minimization (Pause the engine if width/height is 0)
     int width = 0, height = 0;
     glfwGetFramebufferSize(window_, &width, &height);
@@ -536,9 +529,11 @@ void Renderer::createDescriptorSets() {
 
 vk::DescriptorSet Renderer::createTextureDescriptorSet(
     const vk::ImageView imageView,
+    const vk::ImageView normalView,
+    const vk::ImageView metallicRoughnessView,
     const vk::Sampler sampler) {
     // 1. Allocate a single set using the Texture Layout (Set 1)
-    auto allocInfo = vk::DescriptorSetAllocateInfo()
+    const auto allocInfo = vk::DescriptorSetAllocateInfo()
                      .setDescriptorPool(descriptorPool_)
                      .setSetLayouts(textureLayout_); // This is the layout you created for Set 1
 
@@ -551,36 +546,78 @@ vk::DescriptorSet Renderer::createTextureDescriptorSet(
                            .setImageView(imageView)
                            .setSampler(sampler);
 
-    const auto descriptorWrite = vk::WriteDescriptorSet()
-                                 .setDstSet(textureSet)
-                                 .setDstBinding(0) // Binding 0 in Set 1
-                                 .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                                 .setDescriptorCount(1)
-                                 .setPImageInfo(&imageInfo);
+    const auto normalInfo = vk::DescriptorImageInfo()
+                            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                            .setImageView(normalView)
+                            .setSampler(sampler);
 
-    context_.getDevice().updateDescriptorSets(descriptorWrite, nullptr);
+    const auto metalRoughInfo = vk::DescriptorImageInfo()
+                                .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                                .setImageView(metallicRoughnessView) // Pass this in
+                                .setSampler(sampler);
+
+    // 4. Update the set with BOTH writes
+    std::array<vk::WriteDescriptorSet, 3> descriptorWrites{};
+
+    descriptorWrites[0] = vk::WriteDescriptorSet()
+                          .setDstSet(textureSet)
+                          .setDstBinding(0)
+                          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                          .setDescriptorCount(1)
+                          .setPImageInfo(&imageInfo);
+
+    descriptorWrites[1] = vk::WriteDescriptorSet()
+                          .setDstSet(textureSet)
+                          .setDstBinding(1) // <--- Normal Map Binding
+                          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                          .setDescriptorCount(1)
+                          .setPImageInfo(&normalInfo);
+
+    descriptorWrites[2] = vk::WriteDescriptorSet()
+                          .setDstSet(textureSet)
+                          .setDstBinding(2) // Binding 2: Metallic-Roughness
+                          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                          .setDescriptorCount(1)
+                          .setPImageInfo(&metalRoughInfo);
+
+    context_.getDevice().updateDescriptorSets(descriptorWrites, nullptr);
 
     return textureSet;
 }
 
 void Renderer::createDescriptorSetLayout() {
-    // Set 0: Global UBO (Camera)
-    auto uboLayoutBinding = vk::DescriptorSetLayoutBinding()
-                            .setBinding(0)
-                            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                            .setDescriptorCount(1)
-                            .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
+    auto device = context_.getDevice();
 
-    // Set 1: Texture Sampler (Sponza Materials)
-    auto samplerLayoutBinding = vk::DescriptorSetLayoutBinding()
-                                .setBinding(0)
-                                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                                .setDescriptorCount(1)
-                                .setStageFlags(vk::ShaderStageFlagBits::eFragment);
+    // --- [SET 0]: GLOBAL DATA (Camera/UBO) ---
+    {
+        auto uboBinding = vk::DescriptorSetLayoutBinding()
+                          .setBinding(0)
+                          .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                          .setDescriptorCount(1)
+                          .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
 
-    // Create both layouts and store them as members
-    globalDescriptorSetLayout_ = context_.getDevice().createDescriptorSetLayout({{}, 1, &uboLayoutBinding});
-    textureLayout_ = context_.getDevice().createDescriptorSetLayout({{}, 1, &samplerLayoutBinding});
+        vk::DescriptorSetLayoutCreateInfo globalInfo({}, uboBinding);
+        globalDescriptorSetLayout_ = device.createDescriptorSetLayout(globalInfo);
+    }
+
+    // --- [SET 1]: MATERIAL DATA (PBR Textures) ---
+    {
+        // Define bindings clearly with comments
+        std::array<vk::DescriptorSetLayoutBinding, 3> pbrBindings = {
+            // Binding 0: Albedo
+            vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+            // Binding 1: Normal Map
+            vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+            // Binding 2: Metallic-Roughness
+            vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment)
+        };
+
+        vk::DescriptorSetLayoutCreateInfo materialInfo({}, pbrBindings);
+        textureLayout_ = device.createDescriptorSetLayout(materialInfo);
+    }
 }
 
 void Renderer::transitionImageLayout(const vk::CommandBuffer cmd,
@@ -615,35 +652,18 @@ void Renderer::transitionImageLayout(const vk::CommandBuffer cmd,
     cmd.pipelineBarrier2(dependencyInfo);
 }
 
-GltfModel Renderer::uploadModel(const GltfLoader::ModelData &data) const {
-    GltfModel model;
-    model.allocator = context_.getVmaAllocator();
+void Renderer::setupDefaultMaterial(const vk::ImageView whiteView,
+                                    const vk::ImageView normalView,
+                                    const vk::ImageView blackView,
+                                    const vk::Sampler sampler) {
+    defaultMaterial.name = "Renderer_Fallback";
+    defaultMaterial.baseColorFactor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
 
-    // We grab the pool from the Context (as we refactored)
-    vk::CommandPool uploadPool = context_.getTransferCommandPool();
-
-    // The template automatically knows T is Vertex and calculates the size!
-    vk_util::uploadToDeviceBuffer(
-        model.allocator,
-        context_.getDevice(),
-        context_.getGraphicsQueue(),
-        uploadPool,
-        data.vertices,
-        vk::BufferUsageFlagBits::eVertexBuffer,
-        model.vertexBuffer,
-        model.vertexAllocation
+    // Create the descriptor set for the fallback
+    defaultMaterial.textureSet = createTextureDescriptorSet(
+        whiteView,
+        normalView,
+        blackView,
+        sampler
         );
-
-    vk_util::uploadToDeviceBuffer(
-        model.allocator,
-        context_.getDevice(),
-        context_.getGraphicsQueue(),
-        uploadPool,
-        data.indices,
-        vk::BufferUsageFlagBits::eIndexBuffer,
-        model.indexBuffer,
-        model.indexAllocation
-        );
-
-    return model;
 }

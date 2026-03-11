@@ -4,9 +4,7 @@
 
 #include "Model.hpp"
 #include "system/GltfLoader.hpp"
-#include <tiny_obj_loader.h>
 #include <tiny_gltf.h>
-#include <unordered_map>
 #include "../vulkan/VulkanUtils.hpp"
 #include "renderer/renderer.hpp"
 
@@ -17,17 +15,27 @@
 #include <filesystem>
 
 Model::~Model() {
-    // VMA is safe: it ignores null handles, but checking is cleaner
-    if (vertexBuffer_.buffer) {
-        vmaDestroyBuffer(allocator_, static_cast<VkBuffer>(vertexBuffer_.buffer), vertexBuffer_.allocation);
-        vertexBuffer_.buffer = nullptr; // Optional but clean
-        vertexBuffer_.allocation = nullptr;
+    // 1. Destroy Texture Resources
+    for (auto &tex : textures_) {
+        // MUST destroy View before Image
+        if (tex.imageView) {
+            device_.destroyImageView(tex.imageView);
+            tex.imageView = nullptr;
+        }
+
+        if (tex.image) {
+            vmaDestroyImage(allocator_, static_cast<VkImage>(tex.image), tex.allocation);
+            tex.image = nullptr;
+            tex.allocation = nullptr;
+        }
     }
 
+    // 2. Destroy Mesh Buffers
+    if (vertexBuffer_.buffer) {
+        vmaDestroyBuffer(allocator_, static_cast<VkBuffer>(vertexBuffer_.buffer), vertexBuffer_.allocation);
+    }
     if (indexBuffer_.buffer) {
         vmaDestroyBuffer(allocator_, static_cast<VkBuffer>(indexBuffer_.buffer), indexBuffer_.allocation);
-        indexBuffer_.buffer = nullptr;
-        indexBuffer_.allocation = nullptr;
     }
 }
 
@@ -48,10 +56,6 @@ bool Model::loadFromFile(const std::string &filePath, TextureManager &textureMan
     std::ranges::transform(ext, ext.begin(), [](unsigned char c) {
         return std::tolower(c);
     });
-    // 3. Handle OBJ directly
-    // if (ext == ".obj") {
-    //     return loadObj(filePath);
-    // }
 
     // 4. Handle glTF / glb using Header Detection (Magic Number)
     if (ext == ".gltf" || ext == ".glb") {
@@ -73,70 +77,6 @@ bool Model::loadFromFile(const std::string &filePath, TextureManager &textureMan
     return false;
 }
 
-
-/**
- *
-2. The "Handle" Pattern (Industrial Standard)
-
-In industrial engines, the Model doesn't know how to render; it just holds Handles.
-Think of the vk::DescriptorSet as a "key." The Model holds the key, but only the Renderer knows how to use that key to open the "GPU door."
-
-If you don't pass the Renderer (or a resource factory) into loadGltf, your Model would just have a list of image file paths. Then, every frame, the Renderer would have to check: "Do I have a descriptor for this path yet?" This is extremely slow.
-3. Better Architecture: The "Resource Factory"
-
-If passing the entire Renderer into your Model feels too "heavy" (and I agree, it is), the professional way to fix this is to use a Resource Factory or Descriptor Allocator.
-
-Instead of:
-bool loadGltf(..., Renderer &renderer)
-
-todo Use:
-bool loadGltf(..., IDescriptorAllocator &allocator)
- */
-// bool Model::loadGltf(const std::string &filePath,
-//                      const bool isBinary,
-//                      TextureManager &textureManager,
-//                      Renderer &renderer) {
-//     // We pass the isBinary flag we detected in the header check
-//
-//     const GltfLoader gltf_loader(textureManager);
-//
-//     auto data = gltf_loader.loadFromFile(filePath, isBinary);
-//
-//     if (!data.success) {
-//         return false;
-//     }
-//
-//     // Clear old data for re-loading safety
-//     vertices_.clear();
-//     indices_.clear();
-//     submeshes_.clear();
-//
-//     // 1. Move basic geometry
-//     // Move data (Zero-copy)
-//     vertices_ = std::move(data.vertices);
-//     indices_ = std::move(data.indices);
-//     indexCount_ = static_cast<uint32_t>(indices_.size());
-//
-//     for (const auto &m : data.primitives) {
-//         submeshes_.push_back({m.firstIndex, m.indexCount, m.materialIndex});
-//     }
-//
-//     // 2. Create Materials and Descriptor Sets
-//     this->materials_.reserve(data.textures.size());
-//     for (const auto &tex : data.textures) {
-//         Material mat;
-//         mat.name = "Sponza_Material";
-//
-//         // THE KEY STEP: Ask the renderer to create a Set 1 for this texture
-//         // This function would allocate from the pool and write the descriptor
-//         mat.textureSet = renderer.createTextureDescriptorSet(tex.imageView, tex.sampler);
-//
-//         this->materials_.push_back(mat);
-//     }
-//     std::cout << "[Model] Loaded glTF: " << filePath << " (" << vertices_.size() << " verts)" << std::endl;
-//     return true;
-// }
-
 bool Model::loadGltf(const std::string &filePath,
                      const bool isBinary,
                      TextureManager &textureManager,
@@ -148,45 +88,58 @@ bool Model::loadGltf(const std::string &filePath,
     if (!data.success)
         return false;
 
-    // 1. Geometry Move
+    // 1. Ownership Transfer
     vertices_ = std::move(data.vertices);
     indices_ = std::move(data.indices);
     submeshes_ = std::move(data.primitives);
 
-    // 2. Create Descriptor Sets for every image loaded in the glTF
-    // We do this first so we have a 'pool' of textures to pick from
-    std::vector<vk::DescriptorSet> textureSets;
-    textureSets.reserve(data.textures.size());
-    for (const auto &tex : data.textures) {
-        textureSets.push_back(renderer.createTextureDescriptorSet(tex.imageView, tex.sampler));
-    }
+    // CRITICAL: Set this before clearing indices_ in uploadToGPU
+    indexCount_ = static_cast<uint32_t>(indices_.size());
 
-    // 3. Match Materials to those Sets
-    // We need to size this according to how many materials the loader found
+    // Ownership: Move the textures into the Model so they stay alive
+    this->textures_ = std::move(data.textures);
+
+    // 2. Material Processing
     this->materials_.clear();
 
-    // Determine the number of materials in the glTF
-    // If the map is empty, we have no materials to process
-    if (!data.materialToTexture.empty()) {
-        int maxMatIdx = 0;
-        for (auto const &[idx, _] : data.materialToTexture) {
-            maxMatIdx = std::max(maxMatIdx, idx);
-        }
-        materials_.resize(maxMatIdx + 1);
+    for (auto const &[matIdx, info] : data.materials) {
+        Material material;
+        material.name = info.name;
+        material.doubleSided = info.doubleSided;
+        material.alphaCutoff = info.alphaCutoff;
+        material.baseColorFactor = info.baseColorFactor; // Pass color to shader
 
-        for (int i = 0; i <= maxMatIdx; ++i) {
-            if (data.materialToTexture.contains(i)) {
-                int imgIdx = data.materialToTexture.at(i);
+        // --- RESOLVE VIEWS FROM THE NEW OWNER (this->textures_) ---
+        // We use 'this->textures_' because 'data.textures' was moved and is now empty.
+        const vk::ImageView colorView = (info.baseColorIdx != -1)
+                                            ? this->textures_[info.baseColorIdx].imageView
+                                            : textureManager.getWhiteFallback().imageView;
 
-                // If this material points to a valid image, link the DescriptorSet
-                if (imgIdx != -1 && imgIdx < textureSets.size()) {
-                    materials_[i].textureSet = textureSets[imgIdx];
-                }
-            }
+        const vk::ImageView normalView = (info.normalIdx != -1)
+                                             ? this->textures_[info.normalIdx].imageView
+                                             : textureManager.getFlatNormalFallback().imageView;
+
+        const vk::ImageView metalRoughView = (info.metallicRoughnessIdx != -1)
+                                                 ? this->textures_[info.metallicRoughnessIdx].imageView
+                                                 : textureManager.getBlackFallback().imageView;
+
+        // --- BAKE DESCRIPTOR SET ---
+        // Set 1: Binding 0=Albedo, 1=Normal, 2=MetalRough
+        material.textureSet = renderer.createTextureDescriptorSet(
+            colorView,
+            normalView,
+            metalRoughView,
+            textureManager.getDefaultSampler()
+            );
+
+        // Ensure the materials vector is large enough for the glTF index
+        if (matIdx >= materials_.size()) {
+            materials_.resize(matIdx + 1);
         }
+        materials_[matIdx] = material;
     }
 
-    std::cout << "[Model] Finalized " << materials_.size() << " materials for " << filePath << std::endl;
+    std::cout << "[Model] Finalized " << materials_.size() << " PBR materials for " << filePath << std::endl;
     return true;
 }
 

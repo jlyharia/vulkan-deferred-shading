@@ -1,7 +1,6 @@
 #pragma once
 
 #include "common/VulkanInclude.hpp"
-#include <string>
 #include <vector>
 
 #include "../scene/Camera.hpp"
@@ -20,22 +19,6 @@ class RenderPass;
 class SwapChain;
 class VulkanContext;
 
-
-struct GltfModel {
-    vk::Buffer vertexBuffer;
-    VmaAllocation vertexAllocation;
-
-    vk::Buffer indexBuffer;
-    VmaAllocation indexAllocation;
-    uint32_t indexCount;
-
-    // We keep the meshes and textures from ModelData
-    std::vector<Model::Submesh> subMeshes;
-    std::vector<Texture> textures;
-
-    // We'll need this to free everything later
-    VmaAllocator allocator;
-};
 
 class Renderer {
 public:
@@ -58,7 +41,7 @@ public:
                    const UserInterface &userInterface,
                    const std::vector<RenderObject> &renderObjects, vk::PipelineLayout activePipelineLayout);
 
-    void recreateSwapChain();
+    void recreateSwapChain() const;
 
     [[nodiscard]] vk::DescriptorSetLayout getGlobalDescriptorSetLayout() const { return globalDescriptorSetLayout_; }
     [[nodiscard]] vk::DescriptorSetLayout getTextureDescriptorSetLayout() const { return textureLayout_; }
@@ -68,8 +51,17 @@ public:
         return {globalDescriptorSetLayout_, textureLayout_};
     }
 
-    vk::DescriptorSet createTextureDescriptorSet(vk::ImageView imageView, vk::Sampler sampler);
+    vk::DescriptorSet createTextureDescriptorSet(
+        vk::ImageView imageView,
+        vk::ImageView normalView,
+        vk::ImageView metallicRoughnessView,
+        vk::Sampler sampler);
 
+    // Add this to your public or private section
+    void setupDefaultMaterial(vk::ImageView whiteView,
+                              vk::ImageView normalView,
+                              vk::ImageView blackView,
+                              vk::Sampler sampler);
 private:
     void createCommandBuffers();
     void createSyncObjects();
@@ -108,7 +100,6 @@ private:
                                vk::ImageLayout newLayout,
                                vk::ImageAspectFlags aspectMask) const;
 
-    GltfModel uploadModel(const GltfLoader::ModelData &data) const;
 
     // --- Members ---
     VulkanContext &context_;
@@ -139,4 +130,5 @@ private:
 
     // ModelSystem ms;
     std::unique_ptr<Model> model_;
+    Material defaultMaterial;
 };

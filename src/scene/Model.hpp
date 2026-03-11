@@ -3,12 +3,11 @@
 //
 
 #pragma once
-
+#include "common/VulkanInclude.hpp"
 #include "TextureManager.hpp"
 #include "common/Material.hpp"
-#include "common/VulkanInclude.hpp"
+
 #include "common/Vertex.hpp"
-// #include "renderer/renderer.hpp"
 
 #include <string>
 #include <vector>
@@ -18,24 +17,23 @@
 class Renderer;
 struct Vertex;
 
+/**
+ * The TextureManager should own the Texture resources,
+ * while the Model should own the Descriptor Sets.
+ */
 class Model {
 public:
-    struct Submesh {
-        uint32_t firstIndex;
-        uint32_t indexCount;
-        int materialIndex;
-    };
-
     // Constructor takes the allocator so it can create/destroy its own buffers
     // VmaAllocator is just a *pointer* to a struct.
     // Copying a VmaAllocator is just copying 8 bytes (the memory address).
-    explicit Model(const VmaAllocator allocator) : allocator_(allocator) {
+    explicit Model(const VmaAllocator allocator, const vk::Device device)
+        : allocator_(allocator), device_(device) {
     }
 
     ~Model();
 
     // Public API for the Renderer
-    bool loadFromFile(const std::string& filePath, TextureManager& textureManager, Renderer& renderer);
+    bool loadFromFile(const std::string &filePath, TextureManager &textureManager, Renderer &renderer);
     void uploadToGPU(vk::Device device, vk::Queue transferQueue, vk::CommandPool commandPool);
 
     // Getters so the Renderer can bind these to the Command Buffer
@@ -55,14 +53,19 @@ private:
     } vertexBuffer_, indexBuffer_;
 
 
-    // bool loadObj(const std::string &filePath);
-    bool loadGltf(const std::string& filePath, bool isBinary, TextureManager& textureManager, Renderer& renderer);
+    bool loadGltf(const std::string &filePath, bool isBinary, TextureManager &textureManager, Renderer &renderer);
 
     VmaAllocator allocator_;
+    vk::Device device_;
 
     // Sponza Data
     std::vector<Submesh> submeshes_;
     std::vector<Material> materials_;
+
+    // --- THE CRITICAL ADDITION ---
+    // This holds the actual GPU handles for images and views.
+    // Without this, your Material DescriptorSets will point to deleted textures.
+    std::vector<Texture> textures_;
 
     // CPU Data: These replace the globals!
     std::vector<Vertex> vertices_;
