@@ -2,6 +2,8 @@
 #include "VulkanContext.hpp"
 #include "../common/Vertex.hpp"
 #include "swap_chain.hpp"
+#include "common/PushConstantConstant.hpp"
+
 #include <fstream>
 #include <iostream>
 
@@ -85,7 +87,9 @@ void GraphicsPipeline::createGraphicsPipeline() {
                                 .setBlendEnable(false);
 
     auto colorBlending =
-        vk::PipelineColorBlendStateCreateInfo().setLogicOpEnable(false).setAttachments(colorBlendAttachment);
+        vk::PipelineColorBlendStateCreateInfo()
+        .setLogicOpEnable(false)
+        .setAttachments(colorBlendAttachment);
 
     // --- NEW: Dynamic Rendering Info ---
     // In a professional engine, these formats would be passed in as arguments
@@ -137,12 +141,12 @@ vk::ShaderModule GraphicsPipeline::createShaderModule(const std::vector<char> &c
 void GraphicsPipeline::createPipelineLayout(const std::vector<vk::DescriptorSetLayout> &desLayouts) {
     // Push Constant for shading mode
     auto pushConstantRange = vk::PushConstantRange()
-                             .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+                             .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
                              .setOffset(0)
-                             .setSize(sizeof(glm::mat4));
+                             .setSize(sizeof(MeshPushConstants));
 
     // Combine the layouts from the Renderer with the Push Constant
-    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo()
+    const auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo()
                               .setSetLayouts(desLayouts)
                               .setPushConstantRanges(pushConstantRange);
 

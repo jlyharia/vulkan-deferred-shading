@@ -12,7 +12,7 @@ std::shared_ptr<Model> AssetManager::loadModel(const std::string &path) {
         return modelCache_[path];
     }
 
-    auto model = std::make_shared<Model>(context_.getVmaAllocator());
+    auto model = std::make_shared<Model>(context_.getVmaAllocator(), context_.getDevice());
     model->loadFromFile(path, textureManager_, renderer_);
 
     // Use the pool and queue to move data from CPU RAM to GPU VRAM

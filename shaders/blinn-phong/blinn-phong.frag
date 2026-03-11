@@ -1,72 +1,83 @@
 #version 450
 
-// Inputs from Vertex Shader
+// 1. Fixed Locations to match your C++ struct
 layout (location = 0) in vec3 fragPos;
 layout (location = 1) in vec3 fragNormal;
-layout (location = 2) in vec3 fragColor;    // The 0.588 gray stone color
+layout (location = 2) in vec3 fragColor;
 layout (location = 3) in vec2 fragTexCoord;
+layout (location = 4) in vec4 inTangent; // Corrected to 4
 
 layout (location = 0) out vec4 outColor;
 
-// Global Data
+// update per frame
 layout (set = 0, binding = 0) uniform GlobalUBO {
     mat4 view;
     mat4 proj;
     vec4 cameraPos;
 } ubo;
 
-// Texture Sampler
+// Set 1: Matches your Renderer::createDescriptorSetLayout
 layout (set = 1, binding = 0) uniform sampler2D texSampler;
+layout (set = 1, binding = 1) uniform sampler2D normalSampler;
+layout (set = 1, binding = 2) uniform sampler2D metalRoughMap; // The 3rd binding!
 
-// Simple dither to reduce banding
-float screen_dither(vec2 uv) {
-    return (fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
-}
+
+layout (push_constant) uniform Push {
+    mat4 model;
+    vec4 baseColorFactor;
+} pc;
+
 
 void main() {
-    // 1. Handle Normals (Two-Sided Lighting)
-    // Sponza arches and banners often have inverted faces.
-    // If we're looking at the back, flip the normal so lighting works.
-    vec3 N = normalize(fragNormal);
-    if (!gl_FrontFacing) {
-        N = -N;
-    }
-
-    // 2. Lighting Vectors
-    vec3 L = normalize(vec3(-10.0, -10.0, 30.0)); // Directional light
-    vec3 V = normalize(ubo.cameraPos.xyz - fragPos);
-    vec3 H = normalize(L + V);
-
-    // 3. Texture Sampling & Fallback
-    vec4 texColor = texture(texSampler, fragTexCoord);
-
-    // DETERMINING BASE COLOR:
-    // If texture is missing (alpha ~0) or the texture is purely black,
-    // we use the fragColor (the stone gray from your logs).
-    vec3 baseColor;
-    if (texColor.a < 0.05 || length(texColor.rgb) < 0.01) {
-        baseColor = fragColor;
-    } else {
-        // Standard glTF: Multiply texture by the material factor
-        baseColor = texColor.rgb * fragColor;
-    }
-
-    // 4. Transparency (Sponza leaves/decals)
-    // Only discard if the texture was actually supposed to be there (alpha > 0)
-    if (texColor.a > 0.0 && texColor.a < 0.1) {
+    // Standard Alpha Cutout (Fixes the "Strange" Lion edges)
+    vec4 albedoSample = texture(texSampler, fragTexCoord) * pc.baseColorFactor;
+    if (albedoSample.a < 0.1) {
         discard;
     }
 
-    // 5. Blinn-Phong Lighting Calculation
-    vec3 lightColor = vec3(1.0);
-    vec3 ambient = 0.15 * lightColor; // Slightly boosted ambient
+    // --- NORMAL MAPPING (TBN) ---
+    vec3 N = normalize(fragNormal);
+    if (!gl_FrontFacing) { N = -N; }
 
-    float diff = max(dot(N, L), 0.0);
-    float spec = pow(max(dot(N, H), 0.0), 32.0);
+    // Reconstruct the TBN matrix
+    vec3 T = normalize(inTangent.xyz);
+    vec3 B = cross(N, T) * inTangent.w;
+    mat3 TBN = mat3(T, B, N);
 
-    vec3 finalRGB = (ambient + diff + spec) * baseColor;
+    // Sample normal map and remap from [0, 1] to [-1, 1]
+    vec3 localNormal = texture(normalSampler, fragTexCoord).rgb * 2.0 - 1.0;
 
-    // 6. Final Output with Dithering
-    float d = screen_dither(gl_FragCoord.xy);
-    outColor = vec4(finalRGB + d, 1.0);
+    // Transform normal to World Space
+    // If the normal map is missing/black, this will effectively use N
+    vec3 worldNormal = normalize(TBN * normalize(localNormal));
+
+    // In glTF: B = Roughness, G = Metallic
+    vec4 mrSample = texture(metalRoughMap, fragTexCoord);
+    float roughness = mrSample.g;
+    float metallic = mrSample.b;
+
+    // --- LIGHTING ---
+    vec3 L = normalize(vec3(-10.0, -10.0, 30.0));
+    vec3 V = normalize(ubo.cameraPos.xyz - fragPos);
+    vec3 H = normalize(L + V);
+
+    // Diffuse
+    float dotNL = max(dot(worldNormal, L), 0.0);
+    vec3 diffuse = dotNL * albedoSample.rgb * (1.0 - metallic);
+
+    // Specular (Roughness-dependent)
+    // We map roughness to a more visible specular power
+    float shininess = (1.0 - roughness) * 128.0;
+    float spec = pow(max(dot(worldNormal, H), 0.0), shininess);
+    vec3 specular = spec * vec3(0.3) * (metallic + 0.1);
+
+    // 5. Final Composition
+    vec3 ambient = 0.05 * albedoSample.rgb;
+    vec3 color = ambient + diffuse + specular;
+
+    // HDR Tonemapping (Simple Reindhard) + Gamma Correction
+    color = color / (color + vec3(1.0));
+    color = pow(color, vec3(1.0 / 2.2));
+
+    outColor = vec4(color, 1.0);
 }

@@ -81,6 +81,12 @@ void App::initVulkan() {
 
     // 4. Initialize Renderer internal buffers/sets with the Pipeline Layout
     renderer_->initResources();
+    renderer_->setupDefaultMaterial(
+        textureManager_->getWhiteFallback().imageView,
+        textureManager_->getFlatNormalFallback().imageView,
+        textureManager_->getBlackFallback().imageView,
+        textureManager_->getDefaultSampler()
+        );
 
     // 5. Load your objects (calls assetManager->loadModel internally)
     loadScene();
@@ -88,10 +94,11 @@ void App::initVulkan() {
 
 void App::loadScene() {
     // 1. Load the Sponza Mesh (Geometry)
-    sponzaModel_ = std::make_shared<Model>(vulkanContext_->getVmaAllocator());
+    sponzaModel_ = std::make_shared<Model>(vulkanContext_->getVmaAllocator(), vulkanContext_->getDevice());
     sponzaModel_->loadFromFile(
-        // "assets/model/basic/sphere.glb"
-        "assets/model/sponza/glTF/Sponza.gltf",
+        // "assets/model/basic/sphere.glb",
+        // "assets/model/sponza/glTF/Sponza.gltf",
+        "assets/model/sponza_palace/scene.gltf",
         *textureManager_, *renderer_
         );
 

@@ -10,18 +10,20 @@ layout (set = 0, binding = 0) uniform GlobalUBO {
 // 2. Push Constant: Data that changes per DRAW CALL
 layout (push_constant) uniform Push {
     mat4 model;
+    vec4 baseColorFactor;
 } pc;
 
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec2 inTexCoord;
-layout(location = 3) in vec3 inColor;
+layout (location = 0) in vec3 inPosition;
+layout (location = 1) in vec3 inNormal;
+layout (location = 2) in vec2 inTexCoord;
+layout (location = 3) in vec3 inColor;
+layout (location = 4) in vec4 inTangent; // Added: Essential for Normal Mapping
 
 layout (location = 0) out vec3 fragPos;
 layout (location = 1) out vec3 fragNormal;
 layout (location = 2) out vec3 fragColor;
 layout (location = 3) out vec2 fragTexCoord;
+layout (location = 4) out vec4 fragTangent; // Passed to Frag for TBN calculation
 
 void main() {
     vec4 worldPos = pc.model * vec4(inPosition, 1.0);
@@ -29,8 +31,18 @@ void main() {
 
     fragPos = worldPos.xyz;
 
-    // FIX: Use pc.model for normal transformation
-    fragNormal = mat3(transpose(inverse(pc.model))) * inNormal;
+    // Transformation of Normals and Tangents
+    // Note: If you don't have non-uniform scaling, mat3(pc.model) is enough.
+    mat3 normalMatrix = mat3(transpose(inverse(pc.model)));
+
+    fragNormal = normalize(normalMatrix * inNormal);
+
+    // Tangent transformation (xyz part)
+    vec3 T = normalize(normalMatrix * inTangent.xyz);
+    fragTangent = vec4(T, inTangent.w); // Keep the 'w' for bitangent handedness
+
     fragColor = inColor;
-    fragTexCoord = inTexCoord;
+    // glTF uses OpenGL UVs (bottom-left).
+    // Vulkan uses top-left. This line fixes the "Upside Down" issue.
+    fragTexCoord = vec2(inTexCoord.x, 1.0 - inTexCoord.y);
 }

@@ -11,21 +11,12 @@
 #include "../common/Vertex.hpp"
 #include "scene/Model.hpp"
 #include "scene/TextureManager.hpp"
-
+#include "common/Material.hpp"
 
 struct Texture;
 
 class GltfLoader {
 public:
-    struct ModelData {
-        std::vector<Vertex> vertices;
-        std::vector<uint32_t> indices;
-        std::vector<Model::Submesh> primitives;
-        // Maps Material ID -> Texture ID
-        std::map<int, int> materialToTexture;
-        std::vector<Texture> textures;
-        bool success = false;
-    };
 
     // Constructor: Needs the manager to upload textures to GPU
     explicit GltfLoader(TextureManager &textureManager) : textureManager_(textureManager) {
