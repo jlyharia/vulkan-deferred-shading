@@ -34,16 +34,19 @@ Step
 ## Todo
 1. Delete vulkan resources per frame.
 2. Move vulkan resource destroy into queue.
-
+   PBR Shader	Hard	Adds realistic metal, roughness, and light math.
+   Shadow Maps	Very Hard	Adds actual shadows cast by the arches onto the floor.
 # What I have done
 1. Vulkan 1.3
 2. Dynamic Rendering
 3. ImGui
 4. Gltf
+5. Mipmapping
+6. Normal Mapping
 5.  add more objects
    - horizontal grid plan
    - more objects for deferred shading 
-6.
+6. 
 
 horizontal grid plan
 Here is the recommended order: PBR → Shadow Mapping → Deferred Shading.
