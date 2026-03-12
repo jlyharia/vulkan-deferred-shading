@@ -28,7 +28,8 @@ TextureManager::TextureManager(VulkanContext &context) : context_(context) {
     *blackFallback_ = createSinglePixelTexture(0xFF000000, vk::Format::eR8G8B8A8Unorm, "Black_PBR_Fallback");
 }
 
-Texture TextureManager::loadTextureFromGltf(const tinygltf::Image &gltfImage, const bool isColor) {
+Texture TextureManager::loadTextureFromGltf(const tinygltf::Image &gltfImage, const bool isColor) const {
+    uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(gltfImage.width, gltfImage.height)))) + 1;
     // 1. Calculate size and validate
     vk::DeviceSize imageSize = gltfImage.width * gltfImage.height * 4;
 
@@ -66,9 +67,7 @@ Texture TextureManager::loadTextureFromGltf(const tinygltf::Image &gltfImage, co
     texture.height = gltfImage.height;
     texture.name = gltfImage.name;
     texture.format = format; // Store this in your updated struct for debugging
-
-    // Note: We removed 'texture.sampler' and 'texture.descriptorSet' here
-    // because the Material class will now manage the Set.
+    texture.mipLevels = mipLevels;
 
     vk_util::createImage(
         context_.getVmaAllocator(),
@@ -76,16 +75,18 @@ Texture TextureManager::loadTextureFromGltf(const tinygltf::Image &gltfImage, co
         texture.height,
         format,
         vk::ImageTiling::eOptimal,
-        vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+        vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled,
         VMA_MEMORY_USAGE_GPU_ONLY,
         texture.image,
-        texture.allocation
+        texture.allocation,
+        texture.mipLevels
         );
 
     // 5. Execute GPU Transfer (Standard transition logic)
     vk_util::transitionImageLayout(
         context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-        texture.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal
+        texture.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+        mipLevels
         );
 
     vk_util::copyBufferToImage(
@@ -93,16 +94,20 @@ Texture TextureManager::loadTextureFromGltf(const tinygltf::Image &gltfImage, co
         stagingBuffer, texture.image, texture.width, texture.height
         );
 
-    vk_util::transitionImageLayout(
-        context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-        texture.image, format, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal
-        );
+    // REMOVED: transitionImageLayout to ShaderReadOnly
+    // Because generateMipmaps handles the transition to ShaderReadOnly for us!
+    // vk_util::transitionImageLayout(
+    //     context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
+    //     texture.image, format, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal
+    //     );
 
+    generateMipmaps(texture.image, format, texture.width, texture.height, mipLevels);
     // 6. Cleanup Staging Resources
     vmaDestroyBuffer(context_.getVmaAllocator(), stagingBuffer, stagingAllocation);
 
     // 7. Create View
-    texture.imageView = vk_util::createImageView(context_.getDevice(), texture.image, format);
+    texture.imageView = vk_util::createImageView(context_.getDevice(), texture.image, format,
+                                                 vk::ImageAspectFlagBits::eColor, mipLevels);
 
     // Store for mass cleanup in TextureManager::cleanup()
     // loadedTextures_.push_back(texture);
@@ -164,7 +169,9 @@ void TextureManager::createDefaultSampler() {
         .setBorderColor(vk::BorderColor::eIntOpaqueBlack)
         .setUnnormalizedCoordinates(VK_FALSE)
         .setCompareEnable(VK_FALSE)
-        .setMipmapMode(vk::SamplerMipmapMode::eLinear);
+        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+        .setMinLod(0.0f)// change to 8.0 to check if mipmap is working
+        .setMaxLod(VK_LOD_CLAMP_NONE); // or 16.0f Use a high enough number to cover all possible mips (16 is plenty for 4K);
 
     defaultSampler_ = context_.getDevice().createSampler(samplerInfo);
 }
@@ -207,4 +214,88 @@ Texture TextureManager::createSinglePixelTexture(uint32_t pixelData, vk::Format 
     tex.imageView = vk_util::createImageView(context_.getDevice(), tex.image, format);
 
     return tex;
+}
+
+void TextureManager::generateMipmaps(const vk::Image image,
+                                     vk::Format format,
+                                     const int32_t texWidth,
+                                     const int32_t texHeight,
+                                     const uint32_t mipLevels) const {
+    vk::FormatProperties formatProperties = context_.getPhysicalDevice().getFormatProperties(format);
+
+    if (!(formatProperties.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImageFilterLinear)) {
+        throw std::runtime_error("Texture image format does not support linear blitting!");
+    }
+
+    vk::CommandBuffer commandBuffer = vk_util::beginSingleTimeCommands(context_.getDevice(),
+                                                                       context_.getTransferCommandPool());
+
+    vk::ImageMemoryBarrier barrier{};
+    barrier.image = image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.levelCount = 1;
+
+    int32_t mipWidth = texWidth;
+    int32_t mipHeight = texHeight;
+
+    for (uint32_t i = 1; i < mipLevels; i++) {
+        // Transition previous level to TransferSrc
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+        barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+        barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+        barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+
+        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {},
+                                      nullptr, nullptr, barrier);
+
+        // Blit from previous level to current level
+        vk::ImageBlit blit{};
+        blit.srcOffsets[0] = vk::Offset3D{0, 0, 0};
+        blit.srcOffsets[1] = vk::Offset3D{mipWidth, mipHeight, 1};
+        blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+        blit.srcSubresource.mipLevel = i - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount = 1;
+        blit.dstOffsets[0] = vk::Offset3D{0, 0, 0};
+        blit.dstOffsets[1] = vk::Offset3D{mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1};
+        blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+        blit.dstSubresource.mipLevel = i;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount = 1;
+
+        commandBuffer.blitImage(image, vk::ImageLayout::eTransferSrcOptimal, image,
+                                vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
+
+        // Transition previous level to ShaderReadOnly
+        barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+        barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
+        barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
+                                      {}, nullptr, nullptr, barrier);
+
+        if (mipWidth > 1)
+            mipWidth /= 2;
+        if (mipHeight > 1)
+            mipHeight /= 2;
+    }
+
+    // Transition the last mip level to ShaderReadOnly
+    barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+    barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+    barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+    barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader, {},
+                                  nullptr, nullptr, barrier);
+
+    vk_util::endSingleTimeCommands(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
+                                   commandBuffer);
 }

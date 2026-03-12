@@ -34,7 +34,9 @@ void createImage(
     vk::ImageUsageFlags usage,
     VmaMemoryUsage vmaUsage,
     vk::Image &image,
-    VmaAllocation &allocation);
+    VmaAllocation &allocation,
+    uint32_t mipLevels = 1
+    );
 
 // 3. Image Layout Transition (Essential for Textures)
 void transitionImageLayout(
@@ -44,7 +46,8 @@ void transitionImageLayout(
     vk::Image image,
     vk::Format format,
     vk::ImageLayout oldLayout,
-    vk::ImageLayout newLayout);
+    vk::ImageLayout newLayout,
+    uint32_t mipLevels = 1);
 
 // 4. Copy Buffer to Image
 void copyBufferToImage(
@@ -60,7 +63,8 @@ vk::ImageView createImageView(
     vk::Device device,
     vk::Image image,
     vk::Format format,
-    vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor
+    vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor,
+    const uint32_t mipLevels = 1
     );
 
 // 5. One-Time Command Helper (Internal use)

@@ -12,6 +12,7 @@ struct Texture {
     VmaAllocation allocation;
     uint32_t width;
     uint32_t height;
+    uint32_t mipLevels;
     vk::Format format; // CRITICAL: To distinguish sRGB (Color) from Unorm (Normal)
     std::string name;
 };

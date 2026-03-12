@@ -30,12 +30,12 @@ void createBuffer(
 }
 
 void copyBuffer(
-    vk::Device device,
-    vk::CommandPool commandPool,
-    vk::Queue queue,
-    vk::Buffer srcBuffer,
-    vk::Buffer dstBuffer,
-    vk::DeviceSize size) {
+    const vk::Device device,
+    const vk::CommandPool commandPool,
+    const vk::Queue queue,
+    const vk::Buffer srcBuffer,
+    const vk::Buffer dstBuffer,
+    const vk::DeviceSize size) {
 
     vk::CommandBufferAllocateInfo allocInfo(commandPool, vk::CommandBufferLevel::ePrimary, 1);
     auto cmd = device.allocateCommandBuffers(allocInfo)[0];
@@ -46,7 +46,7 @@ void copyBuffer(
 
     // 1. Create the Fence
     vk::FenceCreateInfo fenceInfo{};
-    auto fence = device.createFence(fenceInfo);
+    const auto fence = device.createFence(fenceInfo);
 
     // 2. Submit with the Fence
     vk::SubmitInfo submitInfo{};
@@ -62,20 +62,21 @@ void copyBuffer(
     device.freeCommandBuffers(commandPool, cmd);
 }
 
-void createImage(VmaAllocator allocator,
+void createImage(const VmaAllocator allocator,
                  uint32_t width,
                  uint32_t height,
-                 vk::Format format,
-                 vk::ImageTiling tiling,
-                 vk::ImageUsageFlags usage,
-                 VmaMemoryUsage vmaUsage,
+                 const vk::Format format,
+                 const vk::ImageTiling tiling,
+                 const vk::ImageUsageFlags usage,
+                 const VmaMemoryUsage vmaUsage,
                  vk::Image &image,
-                 VmaAllocation &allocation) {
+                 VmaAllocation &allocation,
+                 const uint32_t mipLevels) {
 
     vk::ImageCreateInfo imageInfo{};
     imageInfo.setImageType(vk::ImageType::e2D)
              .setExtent({width, height, 1})
-             .setMipLevels(1)
+             .setMipLevels(mipLevels)
              .setArrayLayers(1)
              .setFormat(format)
              .setTiling(tiling)
@@ -95,13 +96,14 @@ void createImage(VmaAllocator allocator,
     image = rawImage;
 }
 
-void transitionImageLayout(vk::Device device,
-                           vk::CommandPool commandPool,
-                           vk::Queue graphicsQueue,
-                           vk::Image image,
-                           vk::Format format,
-                           vk::ImageLayout oldLayout,
-                           vk::ImageLayout newLayout) {
+void transitionImageLayout(const vk::Device device,
+                           const vk::CommandPool commandPool,
+                           const vk::Queue graphicsQueue,
+                           const vk::Image image,
+                           const vk::Format format,
+                           const vk::ImageLayout oldLayout,
+                           const vk::ImageLayout newLayout,
+                           const uint32_t mipLevels) {
 
     auto cmd = beginSingleTimeCommands(device, commandPool);
 
@@ -111,7 +113,7 @@ void transitionImageLayout(vk::Device device,
            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
            .setImage(image)
-           .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+           .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1});
 
     vk::PipelineStageFlags sourceStage;
     vk::PipelineStageFlags destinationStage;
@@ -140,7 +142,8 @@ vk::ImageView createImageView(
     const vk::Device device,
     const vk::Image image,
     const vk::Format format,
-    const vk::ImageAspectFlags aspectFlags) {
+    const vk::ImageAspectFlags aspectFlags,
+    const uint32_t mipLevels) {
     // C++20/Vulkan-HPP Chained Setter Style
     vk::ImageViewCreateInfo viewInfo = vk::ImageViewCreateInfo()
                                        .setImage(image)
@@ -149,7 +152,7 @@ vk::ImageView createImageView(
                                        .setSubresourceRange(vk::ImageSubresourceRange()
                                                             .setAspectMask(aspectFlags)
                                                             .setBaseMipLevel(0)
-                                                            .setLevelCount(1)
+                                                            .setLevelCount(mipLevels)
                                                             .setBaseArrayLayer(0)
                                                             .setLayerCount(1));
 
