@@ -8,11 +8,11 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 
-ModelData GltfLoader::loadFromFile(const std::string &path, const bool isBinary) const {
+MeshData GltfLoader::loadFromFile(const std::string &path, const bool isBinary) const {
     tinygltf::Model input;
     tinygltf::TinyGLTF context;
     std::string warn, err;
-    ModelData modelData;
+    MeshData modelData;
     modelData.success = false;
 
     if (!std::filesystem::exists(path)) {
@@ -49,6 +49,9 @@ ModelData GltfLoader::loadFromFile(const std::string &path, const bool isBinary)
         if (gltfMat.normalTexture.index != -1)
             info.normalIdx = input.textures[gltfMat.normalTexture.index].source;
 
+        if (gltfMat.pbrMetallicRoughness.metallicRoughnessTexture.index != -1)
+            info.metallicRoughnessIdx = input.textures[gltfMat.pbrMetallicRoughness.metallicRoughnessTexture.index].source;
+
         // Capture PBR factors and alpha state
         auto &pbr = gltfMat.pbrMetallicRoughness;
         info.baseColorFactor = glm::make_vec4(pbr.baseColorFactor.data());
@@ -77,7 +80,7 @@ ModelData GltfLoader::loadFromFile(const std::string &path, const bool isBinary)
 // Update your function signature to accept a parent transform
 void GltfLoader::processNode(const tinygltf::Model &input,
                              const tinygltf::Node &node,
-                             ModelData &output,
+                             MeshData &output,
                              glm::mat4 parentTransform) {
 
     // 1. Calculate this node's world transform matrix
@@ -125,7 +128,7 @@ void GltfLoader::processNode(const tinygltf::Model &input,
 
 void GltfLoader::processPrimitive(const tinygltf::Model &input,
                                   const tinygltf::Primitive &primitive,
-                                  ModelData &output,
+                                  MeshData &output,
                                   const glm::mat4 &nodeTransform) {
 
     const float *bufferPos = nullptr;
@@ -261,7 +264,7 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
     }
 }
 
-void GltfLoader::loadImages(const tinygltf::Model &model, ModelData &output) const {
+void GltfLoader::loadImages(const tinygltf::Model &model, MeshData &output) const {
     if (model.images.empty())
         return;
 
@@ -284,13 +287,22 @@ void GltfLoader::loadImages(const tinygltf::Model &model, ModelData &output) con
         }
     }
 
-    // 2. Upload to GPU
+    // 2. Upload to GPU — store shared_ptr directly from TextureManager
     output.textures.resize(model.images.size());
     for (size_t i = 0; i < model.images.size(); i++) {
-        bool isColor = !isDataMap[i]; // Data maps are NOT sRGB
-        output.textures[i] = textureManager_.loadTextureFromGltf(model.images[i], isColor);
+        const auto &img = model.images[i];
+        const bool isColor = !isDataMap[i];
+        const vk::Format format = isColor ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
+        const std::string key = img.uri.empty() ? img.name : img.uri;
+
+        output.textures[i] = textureManager_.getOrCreateTexture(
+            key,
+            img.image.data(),
+            static_cast<uint32_t>(img.width),
+            static_cast<uint32_t>(img.height),
+            format);
 
         std::cout << "  [Tex " << i << "] " << (isColor ? "sRGB" : "Unorm")
-            << " | " << model.images[i].name << std::endl;
+            << " | " << img.name << std::endl;
     }
 }

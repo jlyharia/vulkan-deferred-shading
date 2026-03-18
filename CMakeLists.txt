@@ -75,12 +75,12 @@ add_executable(${TARGET_NAME}
         "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_vulkan.cpp"
         src/system/GltfLoader.cpp
         src/system/GltfLoader.hpp
-        src/scene/Model.cpp
-        src/scene/Model.hpp
+        src/scene/Mesh.cpp
+        src/scene/Mesh.hpp
         src/vulkan/VulkanUtils.hpp
         src/core/AssetManager.cpp
         src/core/AssetManager.hpp
-        src/scene/RenderObject.hpp
+        src/scene/MeshInstance.hpp
         src/scene/Transform.hpp
         src/scene/Texture.hpp
         src/scene/TextureManager.cpp
@@ -88,6 +88,9 @@ add_executable(${TARGET_NAME}
         src/vulkan/VulkanUtils.cpp
         src/common/Material.hpp
         src/common/PushConstantConstant.hpp
+        src/scene/PointLIght.hpp
+        src/scene/MeshUtils.cpp
+        src/scene/MeshUtils.hpp
 )
 
 # ------------------------------------------------------------

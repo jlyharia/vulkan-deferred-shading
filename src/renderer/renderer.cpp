@@ -13,7 +13,8 @@
 #include "UserInterface.hpp"
 #include "../common/Vertex.hpp"
 #include "common/config.hpp"
-#include "../scene/Model.hpp"
+#include "scene/Mesh.hpp"
+#include "vulkan/graphics_pipeline.hpp"
 #include "common/PushConstantConstant.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/swap_chain.hpp"
@@ -117,11 +118,10 @@ void Renderer::createCommandBuffers() {
 
 
 void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
-                                   const vk::Pipeline pipeline,
+                                   const GraphicsPipeline &graphicsPipeline,
                                    const uint32_t imageIndex,
                                    const UserInterface &userInterface,
-                                   const std::vector<RenderObject> &renderObjs,
-                                   const vk::PipelineLayout activePipelineLayout) const {
+                                   const std::vector<MeshInstance> &meshInstances) const {
     // 1. Setup
     auto beginInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     cmd.begin(beginInfo);
@@ -130,7 +130,7 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
         prepareFrameImages(cmd, imageIndex);
 
         // 3. Main Geometry Pass
-        renderScene(cmd, pipeline, imageIndex, renderObjs, activePipelineLayout);
+        renderScene(cmd, graphicsPipeline, imageIndex, meshInstances);
 
         // 4. UI Pass (ImGui)
         // Note: UserInterface handles its own begin/endRendering internally
@@ -143,12 +143,10 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
 }
 
 void Renderer::renderScene(const vk::CommandBuffer cmd,
-                           const vk::Pipeline pipeline,
+                           const GraphicsPipeline &graphicsPipeline,
                            const uint32_t imageIndex,
-                           const std::vector<RenderObject> &objects,
-                           const vk::PipelineLayout activePipelineLayout) const {
+                           const std::vector<MeshInstance> &meshInstances) const {
 
-    // Create attachment info using helpers to keep this clean
     auto colorAttachment = getPrimaryColorAttachment(imageIndex);
     auto depthAttachment = getPrimaryDepthAttachment();
 
@@ -158,10 +156,10 @@ void Renderer::renderScene(const vk::CommandBuffer cmd,
                  .setColorAttachments(colorAttachment)
                  .setPDepthAttachment(&depthAttachment);
 
+    const vk::PipelineLayout layout = graphicsPipeline.getPipelineLayout();
+
     cmd.beginRendering(renderingInfo);
     {
-        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-
         // Dynamic State
         auto extent = swapChain_.getExtent();
         cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
@@ -170,58 +168,62 @@ void Renderer::renderScene(const vk::CommandBuffer cmd,
                                         0.0f, 1.0f));
         cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
 
-        // Bind Global Uniforms (Camera View/Proj) - Done ONCE per frame
+        // Bind Global Uniforms (Camera View/Proj) — done once, layout is shared
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               activePipelineLayout,
-                               DescriptorSets::GLOBAL_SET, // This is Set 0 in your shader
+                               layout,
+                               DescriptorSets::GLOBAL_SET,
                                {descriptorSets_[currentFrame]},
                                {});
 
+        vk::Pipeline currentPipeline = nullptr;
+
         // --- THE OBJECT LOOP ---
-        for (const auto &[model, transform, name] : objects) {
-            if (!model)
+        for (const auto &[mesh, transform, name, color] : meshInstances) {
+            if (!mesh)
                 continue;
 
-            // 2. Bind the Model's GPU Buffers
             vk::DeviceSize offsets[] = {0};
-            cmd.bindVertexBuffers(0, {model->getVertexBuffer()}, offsets);
-            cmd.bindIndexBuffer(model->getIndexBuffer(), 0, vk::IndexType::eUint32);
+            cmd.bindVertexBuffers(0, {mesh->getVertexBuffer()}, offsets);
+            cmd.bindIndexBuffer(mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
 
-            // 3. DRAW SUBMESHES (The Material Loop)
-            const auto &materials = model->getMaterials();
+            const auto &materials = mesh->getMaterials();
 
-            for (const auto &submesh : model->getSubmeshes()) {
-                // --- 1. RESOLVE MATERIAL ---
+            for (const auto &submesh : mesh->getSubmeshes()) {
                 const auto &mat = (submesh.materialIndex >= 0)
                                       ? materials[submesh.materialIndex]
                                       : defaultMaterial;
 
-                // --- 2. UPDATE PUSH CONSTANTS (Matrix + Color) ---
-                // We create a temporary struct to push everything at once
+                // --- SELECT PIPELINE ---
+                const vk::Pipeline targetPipeline = mat.unlit
+                                                        ? graphicsPipeline.getUnlitPipeline()
+                                                        : graphicsPipeline.getPbrPipeline();
+                if (targetPipeline != currentPipeline) {
+                    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, targetPipeline);
+                    currentPipeline = targetPipeline;
+                }
+
+                // --- PUSH CONSTANTS (Matrix + per-instance color * material factor) ---
                 MeshPushConstants constants;
-                constants.modelMatrix = transform.modelMatrix;
-                constants.baseColorFactor = mat.baseColorFactor; // The "Lion Fix"
+                constants.modelMatrix     = transform.modelMatrix;
+                constants.baseColorFactor = color * mat.baseColorFactor;
 
                 cmd.pushConstants<MeshPushConstants>(
-                    activePipelineLayout,
+                    layout,
                     vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
                     0,
-                    constants
-                    );
+                    constants);
 
-                // --- 3. BIND MATERIAL (SET 1) ---
+                // --- BIND MATERIAL TEXTURES (SET 1) ---
                 if (mat.textureSet) {
                     cmd.bindDescriptorSets(
                         vk::PipelineBindPoint::eGraphics,
-                        activePipelineLayout,
-                        DescriptorSets::MATERIAL_SET, // Set 1
+                        layout,
+                        DescriptorSets::MATERIAL_SET,
                         {mat.textureSet},
-                        {}
-                        );
+                        {});
                 }
-                // 4. Draw the specific index range for this material
+
                 cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
-                // cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
             }
         }
     }
@@ -298,12 +300,11 @@ void Renderer::createSyncObjects() {
     }
 }
 
-void Renderer::drawFrame(const vk::Pipeline pipeline,
+void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
                          const bool framebufferResized,
                          const Camera &camera,
                          const UserInterface &userInterface,
-                         const std::vector<RenderObject> &renderObjects,
-                         const vk::PipelineLayout activePipelineLayout) {
+                         const std::vector<MeshInstance> &meshInstances) {
     auto device = context_.getDevice();
 
     // 1. Wait for the Frame Slot to be free (CPU-GPU Sync)
@@ -336,8 +337,7 @@ void Renderer::drawFrame(const vk::Pipeline pipeline,
     updateUniformBuffer(currentFrame, camera);
 
     commandBuffers_[currentFrame].reset();
-    recordCommandBuffer(commandBuffers_[currentFrame], pipeline, imageIndex, userInterface, renderObjects,
-                        activePipelineLayout);
+    recordCommandBuffer(commandBuffers_[currentFrame], graphicsPipeline, imageIndex, userInterface, meshInstances);
 
     // 5. Submit Info (Modern C++ Style)
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};

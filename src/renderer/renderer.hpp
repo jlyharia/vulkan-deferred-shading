@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "../scene/Camera.hpp"
-#include "scene/RenderObject.hpp"
+#include "scene/MeshInstance.hpp"
 #include "system/GltfLoader.hpp"
 
 
@@ -12,8 +12,9 @@
 
 
 struct Texture;
-class Model;
+class Mesh;
 class UserInterface;
+class GraphicsPipeline;
 // Forward declarations
 class RenderPass;
 class SwapChain;
@@ -34,12 +35,11 @@ public:
     void initResources();
     void createDescriptorSetLayout();
 
-    // Changed to vk::Pipeline for C++ style consistency
-    void drawFrame(vk::Pipeline pipeline,
+    void drawFrame(const GraphicsPipeline &graphicsPipeline,
                    bool framebufferResized,
                    const Camera &camera,
                    const UserInterface &userInterface,
-                   const std::vector<RenderObject> &renderObjects, vk::PipelineLayout activePipelineLayout);
+                   const std::vector<MeshInstance> &meshInstances);
 
     void recreateSwapChain() const;
 
@@ -57,7 +57,6 @@ public:
         vk::ImageView metallicRoughnessView,
         vk::Sampler sampler);
 
-    // Add this to your public or private section
     void setupDefaultMaterial(vk::ImageView whiteView,
                               vk::ImageView normalView,
                               vk::ImageView blackView,
@@ -66,23 +65,20 @@ private:
     void createCommandBuffers();
     void createSyncObjects();
 
-    // Updated to use vk:: types
     void recordCommandBuffer(vk::CommandBuffer cmd,
-                             vk::Pipeline pipeline,
+                             const GraphicsPipeline &graphicsPipeline,
                              uint32_t imageIndex,
                              const UserInterface &userInterface,
-                             const std::vector<RenderObject> &renderObjs,
-                             vk::PipelineLayout activePipelineLayout) const;
+                             const std::vector<MeshInstance> &meshInstances) const;
     void renderScene(vk::CommandBuffer cmd,
-                     vk::Pipeline pipeline,
+                     const GraphicsPipeline &graphicsPipeline,
                      uint32_t imageIndex,
-                     const std::vector<RenderObject> &objects, vk::PipelineLayout activePipelineLayout) const;
+                     const std::vector<MeshInstance> &meshInstances) const;
     [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryColorAttachment(uint32_t imageIndex) const;
     [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryDepthAttachment() const;
     void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
     void finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
 
-    // Your updated C++ style buffer helper
     void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage vmaUsage, vk::Buffer &buffer,
                       VmaAllocation &allocation, VmaAllocationCreateFlags vmaFlags = 0,
                       VmaAllocationInfo *outAllocInfo = nullptr) const;
@@ -128,7 +124,5 @@ private:
     vk::DescriptorSetLayout globalDescriptorSetLayout_;
     vk::DescriptorSetLayout textureLayout_;
 
-    // ModelSystem ms;
-    std::unique_ptr<Model> model_;
     Material defaultMaterial;
 };

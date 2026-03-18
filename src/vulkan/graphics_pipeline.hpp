@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/VulkanInclude.hpp"
+#include <string>
 #include <vector>
 
 class SwapChain;
@@ -11,38 +12,31 @@ class VulkanContext;
 
 class GraphicsPipeline {
 public:
-    // Constructor & Destructor
     GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
                      const std::vector<vk::DescriptorSetLayout> &descriptorSetLayouts)
         : context_(context), swapChain_(swapChain) {
-        // 1. Create the Layout FIRST
         createPipelineLayout(descriptorSetLayouts);
-        // 2. Create the Pipeline SECOND
-        createGraphicsPipeline();
+        pbrPipeline_   = buildPipeline("shaders/pbr/pbr.vert.spv",    "shaders/pbr/pbr.frag.spv");
+        unlitPipeline_ = buildPipeline("shaders/unlit/unlit.vert.spv", "shaders/unlit/unlit.frag.spv");
     }
     ~GraphicsPipeline();
 
-    // Non-copyable
     GraphicsPipeline(const GraphicsPipeline &) = delete;
     GraphicsPipeline &operator=(const GraphicsPipeline &) = delete;
 
-    // Getters
-    [[nodiscard]] vk::Pipeline getPipeline() const { return graphicsPipeline_; }
+    [[nodiscard]] vk::Pipeline getPbrPipeline()          const { return pbrPipeline_; }
+    [[nodiscard]] vk::Pipeline getUnlitPipeline()        const { return unlitPipeline_; }
     [[nodiscard]] vk::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
 
 private:
-    // Context references
     VulkanContext &context_;
     SwapChain &swapChain_;
 
-    // Pipeline resources
     vk::PipelineLayout pipelineLayout_;
-    vk::Pipeline graphicsPipeline_;
+    vk::Pipeline pbrPipeline_;
+    vk::Pipeline unlitPipeline_;
 
-    // for graphic pipeline layout, not descriptor layout
     void createPipelineLayout(const std::vector<vk::DescriptorSetLayout> &desLayouts);
-    void createGraphicsPipeline();
-
-    // Helper methods
+    [[nodiscard]] vk::Pipeline buildPipeline(const std::string &vertSpv, const std::string &fragSpv) const;
     [[nodiscard]] vk::ShaderModule createShaderModule(const std::vector<char> &code) const;
 };
