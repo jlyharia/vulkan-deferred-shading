@@ -5,17 +5,13 @@
 #pragma once
 
 #include "common/VulkanInclude.hpp"
-
-#pragma once
-
-#include <vulkan/vulkan.hpp>
+#include "scene/Texture.hpp"
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
 #include <map>
 #include <memory>
 
-// Include your Vertex definition here or ensure it's in your project's include path
 #include "Vertex.hpp"
 
 // --- 1. GEOMETRY TYPES ---
@@ -28,19 +24,19 @@
 struct Submesh {
     uint32_t firstIndex;
     uint32_t indexCount;
-    int materialIndex; // Index into the Model's material vector
+    int materialIndex; // Index into the Mesh's material vector
 };
 
 // --- 2. LOADER TYPES ---
 
 /**
  * A lightweight info struct used by the GltfLoader to communicate
- * material requirements back to the Model class.
+ * material requirements back to the AssetManager.
  */
 struct MaterialInfo {
     std::string name;
 
-    // Indices into the ModelData::textures vector
+    // Indices into the MeshData::textures vector
     int baseColorIdx = -1;
     int normalIdx = -1;
     int metallicRoughnessIdx = -1;
@@ -53,13 +49,14 @@ struct MaterialInfo {
     // Pipeline states
     bool doubleSided = false;
     float alphaCutoff = 0.5f;
-    bool isTransparent = false; // Determined by glTF 'alphaMode'
+    bool isTransparent = false;
 };
 
 /**
- * Model own the texture resource
+ * Intermediate data returned by GltfLoader to AssetManager.
+ * Textures are shared_ptr so AssetManager can move them directly into Materials.
  */
-struct ModelData {
+struct MeshData {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<Submesh> primitives;
@@ -67,8 +64,8 @@ struct ModelData {
     // Maps glTF Material Index -> Our MaterialInfo
     std::map<int, MaterialInfo> materials;
 
-    // We assume Texture is your struct containing vk::Image, VmaAllocation, etc.
-    std::vector<Texture> textures;
+    // shared_ptr: TextureManager owns the GPU resource, Materials share ownership
+    std::vector<std::shared_ptr<Texture>> textures;
 
     bool success = false;
 };
@@ -76,39 +73,34 @@ struct ModelData {
 // --- 3. THE MATERIAL CLASS ---
 
 /**
- * The Material class manages the Vulkan DescriptorSet (Set 1)
- * and the specific PBR parameters for a surface.
+ * Holds PBR surface parameters and shared ownership of its textures.
+ * Texture lifetime: Material alive => shared_ptr alive => GPU resource alive.
  */
 class Material {
 public:
     std::string name;
 
-    /** * The baked Descriptor Set for Set 1.
+    // Texture ownership — shared with TextureManager's cache
+    std::shared_ptr<Texture> albedoTexture;
+    std::shared_ptr<Texture> normalTexture;
+    std::shared_ptr<Texture> metallicRoughnessTexture;
+
+    /**
+     * The baked Descriptor Set for Set 1.
      * Binding 0: sampler2D baseColor
      * Binding 1: sampler2D normalMap
-     * Binding 2: sampler2D metallicRoughness (Optional but recommended)
+     * Binding 2: sampler2D metallicRoughness
      */
     vk::DescriptorSet textureSet;
 
     // --- PBR Parameters ---
-    // These should be sent to the shader via Push Constants
     glm::vec4 baseColorFactor = glm::vec4(1.0f);
     float metallicFactor = 1.0f;
     float roughnessFactor = 1.0f;
 
     // --- Pipeline State ---
-    bool doubleSided = false; // Disables Backface Culling
-    float alphaCutoff = 0.5f; // Alpha testing threshold
-    bool isTransparent = false; // Enables Alpha Blending
-
-    // --- Resource Management ---
-    // Storing these allows the Model to track which textures are in use
-    int baseColorIndex = -1;
-    int normalMapIndex = -1;
-    int metallicRoughnessIndex = -1;
-
-    // Constructor/Destructor can be added here if you want to manage
-    // the descriptor set lifetime directly.
+    bool doubleSided = false;
+    float alphaCutoff = 0.5f;
+    bool isTransparent = false;
+    bool unlit = false; // skips lighting — use for emissive objects like light indicators
 };
-
-

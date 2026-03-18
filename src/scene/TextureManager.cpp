@@ -3,186 +3,148 @@
 //
 
 #include "TextureManager.hpp"
-
 #include "vulkan/VulkanContext.hpp"
-#include "vulkan/VulkanUtils.hpp" // Your namespace vk_util
+#include "vulkan/VulkanUtils.hpp"
 #include <iostream>
+#include <algorithm>
+#include <cmath>
 
 TextureManager::TextureManager(VulkanContext &context) : context_(context) {
-
     createDefaultSampler();
 
-    // 1. Allocate the unique_ptrs
-    whiteFallback_ = std::make_unique<Texture>();
-    normalFallback_ = std::make_unique<Texture>();
-    blackFallback_ = std::make_unique<Texture>(); // Added this!
-
-    // 2. Initialize with names for the Vulkan Debugger
-    // 0xFFFFFFFF = Pure White (Albedo)
-    *whiteFallback_ = createSinglePixelTexture(0xFFFFFFFF, vk::Format::eR8G8B8A8Srgb, "White_Fallback");
-
-    // 0xFFFF8080 = Flat Normal (Tangent Space: 128, 128, 255)
-    *normalFallback_ = createSinglePixelTexture(0xFFFF8080, vk::Format::eR8G8B8A8Unorm, "Flat_Normal_Fallback");
-
-    // 0xFF000000 = Black (Roughness: 0, Metallic: 0)
-    *blackFallback_ = createSinglePixelTexture(0xFF000000, vk::Format::eR8G8B8A8Unorm, "Black_PBR_Fallback");
+    // Initialize Fallbacks with specific hex colors (ABGR format for easy memcpy)
+    // White: 0xFFFFFFFF
+    whiteFallback_ = createSinglePixelTexture(0xFFFFFFFF, vk::Format::eR8G8B8A8Srgb, "White_Fallback");
+    // Flat Normal (Blueish): 0xFFFF8080 (Matches roughly 0.5, 0.5, 1.0)
+    normalFallback_ = createSinglePixelTexture(0xFFFF8080, vk::Format::eR8G8B8A8Unorm, "Flat_Normal_Fallback");
+    // Black (PBR Metal/Roughness/Occlusion): 0xFF000000
+    blackFallback_ = createSinglePixelTexture(0xFF000000, vk::Format::eR8G8B8A8Unorm, "Black_PBR_Fallback");
 }
 
-Texture TextureManager::loadTextureFromGltf(const tinygltf::Image &gltfImage, const bool isColor) const {
-    uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(gltfImage.width, gltfImage.height)))) + 1;
-    // 1. Calculate size and validate
-    vk::DeviceSize imageSize = gltfImage.width * gltfImage.height * 4;
+TextureManager::~TextureManager() {
+    cleanup();
+}
 
-    // Safety check: ensure we have 4 components (RGBA)
-    if (gltfImage.component != 4) {
-        throw std::runtime_error("TextureManager only supports 4-component RGBA textures for now.");
+/**
+ * THE PURE INTERFACE:
+ * This is the new "Workhorse" of the class. It doesn't know about glTF.
+ */
+std::shared_ptr<Texture> TextureManager::getOrCreateTexture(
+    const std::string &key,
+    const unsigned char *pixelData,
+    uint32_t width,
+    uint32_t height,
+    vk::Format format) {
+    // 1. Cache Check
+    if (textureCache_.contains(key)) {
+        return textureCache_[key];
     }
 
-    // 2. Create Staging Buffer
+    // 2. Setup Texture metadata
+    auto texture = std::make_shared<Texture>();
+    texture->device = context_.getDevice();
+    texture->allocator = context_.getVmaAllocator();
+    texture->width = width;
+    texture->height = height;
+    texture->name = key;
+    texture->format = format;
+    texture->mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+
+    vk::DeviceSize imageSize = width * height * 4;
+
+    // 3. Create Staging Buffer
     vk::Buffer stagingBuffer;
     VmaAllocation stagingAllocation;
-    vk_util::createBuffer(
-        context_.getVmaAllocator(),
-        imageSize,
-        vk::BufferUsageFlagBits::eTransferSrc,
-        VMA_MEMORY_USAGE_CPU_ONLY,
-        stagingBuffer,
-        stagingAllocation
-        );
+    vk_util::createBuffer(context_.getVmaAllocator(), imageSize,
+                          vk::BufferUsageFlagBits::eTransferSrc,
+                          VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAllocation);
 
-    // 3. Map memory and copy pixels
+    // Map and Copy
     void *data;
     vmaMapMemory(context_.getVmaAllocator(), stagingAllocation, &data);
-    memcpy(data, gltfImage.image.data(), static_cast<size_t>(imageSize));
+    memcpy(data, pixelData, static_cast<size_t>(imageSize));
     vmaUnmapMemory(context_.getVmaAllocator(), stagingAllocation);
 
-    // --- THE PBR CHANGE: Format Selection ---
-    // sRGB for Albedo/Diffuse colors.
-    // Unorm for Linear data like Normal, Metallic, or Roughness maps.
-    vk::Format format = isColor ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
-
-    // 4. Create Final GPU Image
-    Texture texture;
-    texture.width = gltfImage.width;
-    texture.height = gltfImage.height;
-    texture.name = gltfImage.name;
-    texture.format = format; // Store this in your updated struct for debugging
-    texture.mipLevels = mipLevels;
-
+    // 4. Create GPU Image
     vk_util::createImage(
-        context_.getVmaAllocator(),
-        texture.width,
-        texture.height,
-        format,
-        vk::ImageTiling::eOptimal,
+        context_.getVmaAllocator(), texture->width, texture->height, format, vk::ImageTiling::eOptimal,
         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled,
-        VMA_MEMORY_USAGE_GPU_ONLY,
-        texture.image,
-        texture.allocation,
-        texture.mipLevels
-        );
+        VMA_MEMORY_USAGE_GPU_ONLY, texture->image, texture->allocation, texture->mipLevels);
 
-    // 5. Execute GPU Transfer (Standard transition logic)
-    vk_util::transitionImageLayout(
-        context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-        texture.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
-        mipLevels
-        );
+    // 5. GPU Transfer
+    vk_util::transitionImageLayout(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
+                                   texture->image, format, vk::ImageLayout::eUndefined,
+                                   vk::ImageLayout::eTransferDstOptimal, texture->mipLevels);
 
-    vk_util::copyBufferToImage(
-        context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-        stagingBuffer, texture.image, texture.width, texture.height
-        );
+    vk_util::copyBufferToImage(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
+                               stagingBuffer, texture->image, texture->width, texture->height);
 
-    // REMOVED: transitionImageLayout to ShaderReadOnly
-    // Because generateMipmaps handles the transition to ShaderReadOnly for us!
-    // vk_util::transitionImageLayout(
-    //     context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-    //     texture.image, format, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal
-    //     );
+    // 6. Finalize (Mips & Transition to ShaderReadOnly)
+    generateMipmaps(texture->image, format, texture->width, texture->height, texture->mipLevels);
 
-    generateMipmaps(texture.image, format, texture.width, texture.height, mipLevels);
-    // 6. Cleanup Staging Resources
+    // Cleanup Staging
     vmaDestroyBuffer(context_.getVmaAllocator(), stagingBuffer, stagingAllocation);
 
-    // 7. Create View
-    texture.imageView = vk_util::createImageView(context_.getDevice(), texture.image, format,
-                                                 vk::ImageAspectFlagBits::eColor, mipLevels);
+    // Create View
+    texture->imageView = vk_util::createImageView(context_.getDevice(), texture->image, format,
+                                                  vk::ImageAspectFlagBits::eColor, texture->mipLevels);
 
-    // Store for mass cleanup in TextureManager::cleanup()
-    // loadedTextures_.push_back(texture);
-
-    std::cout << "[TextureManager] Loaded " << (isColor ? "Color" : "Data")
-        << " texture: " << texture.name << " (" << texture.width << "x" << texture.height << ")" << std::endl;
+    // 7. Store in Cache
+    textureCache_[key] = texture;
+    std::cout << "[TextureManager] VRAM Upload Successful: " << key << " (" << width << "x" << height << ")" <<
+        std::endl;
 
     return texture;
 }
 
+void TextureManager::clearCache() {
+    textureCache_.clear();
+}
+
 void TextureManager::cleanup() {
-    // Helper lambda to avoid repeating the destruction logic
-    auto destroyTex = [this](Texture &tex) {
-        if (tex.imageView) {
-            context_.getDevice().destroyImageView(tex.imageView);
-            tex.imageView = nullptr;
-        }
-        if (tex.image) {
-            vmaDestroyImage(context_.getVmaAllocator(), tex.image, tex.allocation);
-            tex.image = nullptr;
-            tex.allocation = nullptr;
-        }
-    };
+    // Releasing shared_ptrs triggers Texture::~Texture() on last ref, which
+    // destroys the GPU resources. No manual vkDestroy needed here.
+    textureCache_.clear();
+    whiteFallback_.reset();
+    normalFallback_.reset();
+    blackFallback_.reset();
 
-    // 2. Clean up Fallbacks (Crucial: otherwise these leak every time you restart)
-    if (whiteFallback_) {
-        destroyTex(*whiteFallback_);
-    }
-    if (normalFallback_) {
-        destroyTex(*normalFallback_);
-    }
-
-    if (blackFallback_) {
-        destroyTex(*blackFallback_);
-    }
-
-    // 3. Clean up the Sampler
     if (defaultSampler_) {
         context_.getDevice().destroySampler(defaultSampler_);
         defaultSampler_ = nullptr;
     }
-
-    std::cout << "[TextureManager] Cleanup complete. All Vulkan resources freed." << std::endl;
 }
-
 
 void TextureManager::createDefaultSampler() {
     const vk::SamplerCreateInfo samplerInfo =
         vk::SamplerCreateInfo()
         .setMagFilter(vk::Filter::eLinear)
         .setMinFilter(vk::Filter::eLinear)
-        .setAddressModeU(vk::SamplerAddressMode::eRepeat) // Sponza floors repeat!
+        .setAddressModeU(vk::SamplerAddressMode::eRepeat)
         .setAddressModeV(vk::SamplerAddressMode::eRepeat)
         .setAddressModeW(vk::SamplerAddressMode::eRepeat)
-        .setAnisotropyEnable(VK_TRUE) // Makes textures sharp at angles
-        .setMaxAnisotropy(
-            context_.getPhysicalDevice().getProperties().limits.
-                     maxSamplerAnisotropy)
+        .setAnisotropyEnable(VK_TRUE)
+        .setMaxAnisotropy(context_.getPhysicalDevice().getProperties().limits.maxSamplerAnisotropy)
         .setBorderColor(vk::BorderColor::eIntOpaqueBlack)
         .setUnnormalizedCoordinates(VK_FALSE)
         .setCompareEnable(VK_FALSE)
         .setMipmapMode(vk::SamplerMipmapMode::eLinear)
-        .setMinLod(0.0f)// change to 8.0 to check if mipmap is working
-        .setMaxLod(VK_LOD_CLAMP_NONE); // or 16.0f Use a high enough number to cover all possible mips (16 is plenty for 4K);
+        .setMinLod(0.0f)
+        .setMaxLod(VK_LOD_CLAMP_NONE);
 
     defaultSampler_ = context_.getDevice().createSampler(samplerInfo);
 }
 
-
-Texture TextureManager::createSinglePixelTexture(uint32_t pixelData, vk::Format format, std::string name) const {
-    Texture tex;
-    tex.width = 1;
-    tex.height = 1;
-    tex.name = std::move(name);
-    tex.format = format;
+std::shared_ptr<Texture> TextureManager::createSinglePixelTexture(uint32_t pixelData, vk::Format format,
+                                                                  std::string name) {
+    auto tex = std::make_shared<Texture>();
+    tex->device = context_.getDevice();
+    tex->allocator = context_.getVmaAllocator();
+    tex->width = 1;
+    tex->height = 1;
+    tex->name = std::move(name);
+    tex->format = format;
+    tex->mipLevels = 1;
 
     vk::DeviceSize size = 4;
     vk::Buffer staging;
@@ -197,30 +159,26 @@ Texture TextureManager::createSinglePixelTexture(uint32_t pixelData, vk::Format 
 
     vk_util::createImage(context_.getVmaAllocator(), 1, 1, format, vk::ImageTiling::eOptimal,
                          vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-                         VMA_MEMORY_USAGE_GPU_ONLY, tex.image, tex.allocation);
+                         VMA_MEMORY_USAGE_GPU_ONLY, tex->image, tex->allocation);
 
     vk_util::transitionImageLayout(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-                                   tex.image, format, vk::ImageLayout::eUndefined,
+                                   tex->image, format, vk::ImageLayout::eUndefined,
                                    vk::ImageLayout::eTransferDstOptimal);
 
     vk_util::copyBufferToImage(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-                               staging, tex.image, 1, 1);
+                               staging, tex->image, 1, 1);
 
     vk_util::transitionImageLayout(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-                                   tex.image, format, vk::ImageLayout::eTransferDstOptimal,
+                                   tex->image, format, vk::ImageLayout::eTransferDstOptimal,
                                    vk::ImageLayout::eShaderReadOnlyOptimal);
 
     vmaDestroyBuffer(context_.getVmaAllocator(), staging, stagingAlloc);
-    tex.imageView = vk_util::createImageView(context_.getDevice(), tex.image, format);
-
+    tex->imageView = vk_util::createImageView(context_.getDevice(), tex->image, format);
     return tex;
 }
 
-void TextureManager::generateMipmaps(const vk::Image image,
-                                     vk::Format format,
-                                     const int32_t texWidth,
-                                     const int32_t texHeight,
-                                     const uint32_t mipLevels) const {
+void TextureManager::generateMipmaps(const vk::Image image, vk::Format format, const int32_t texWidth,
+                                     const int32_t texHeight, const uint32_t mipLevels) const {
     vk::FormatProperties formatProperties = context_.getPhysicalDevice().getFormatProperties(format);
 
     if (!(formatProperties.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImageFilterLinear)) {
@@ -243,7 +201,6 @@ void TextureManager::generateMipmaps(const vk::Image image,
     int32_t mipHeight = texHeight;
 
     for (uint32_t i = 1; i < mipLevels; i++) {
-        // Transition previous level to TransferSrc
         barrier.subresourceRange.baseMipLevel = i - 1;
         barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
         barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
@@ -253,7 +210,6 @@ void TextureManager::generateMipmaps(const vk::Image image,
         commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {},
                                       nullptr, nullptr, barrier);
 
-        // Blit from previous level to current level
         vk::ImageBlit blit{};
         blit.srcOffsets[0] = vk::Offset3D{0, 0, 0};
         blit.srcOffsets[1] = vk::Offset3D{mipWidth, mipHeight, 1};
@@ -271,7 +227,6 @@ void TextureManager::generateMipmaps(const vk::Image image,
         commandBuffer.blitImage(image, vk::ImageLayout::eTransferSrcOptimal, image,
                                 vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
 
-        // Transition previous level to ShaderReadOnly
         barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
         barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
         barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
@@ -286,7 +241,6 @@ void TextureManager::generateMipmaps(const vk::Image image,
             mipHeight /= 2;
     }
 
-    // Transition the last mip level to ShaderReadOnly
     barrier.subresourceRange.baseMipLevel = mipLevels - 1;
     barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
     barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;

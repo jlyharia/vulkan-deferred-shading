@@ -11,25 +11,38 @@
 #include <string>
 #include "vulkan/VulkanContext.hpp"
 
-class Model;
+class Mesh;
+struct Vertex;
 
 class AssetManager {
 public:
-    // Pass the command pool from the renderer during init
-    AssetManager(VulkanContext &context, vk::CommandPool transferPool, TextureManager& textureManager, Renderer& renderer)
+    AssetManager(VulkanContext &context, vk::CommandPool transferPool, TextureManager &textureManager,
+                 Renderer &renderer)
         : context_(context), transferPool_(transferPool), textureManager_(textureManager), renderer_(renderer) {
     }
 
-    // Return shared_ptr to match your RenderObject migration
-    std::shared_ptr<Model> loadModel(const std::string &path);
+    /** @brief Loads a model from a glTF/GLB file, assembles materials, and caches it. */
+    std::shared_ptr<Mesh> loadModel(const std::string &path);
 
-    void clearCache() { modelCache_.clear(); }
+    /** @brief Returns a cached unit sphere (generated procedurally on first call). */
+    std::shared_ptr<Mesh> getSharedSphere();
+
+    void clearCache() {
+        modelCache_.clear();
+        sharedSphere_ = nullptr;
+    }
 
 private:
+    /** @brief Uploads vertex/index data to GPU and calls mesh->setGpuResources(). */
+    void uploadMeshDataToGPU(std::shared_ptr<Mesh> mesh,
+                              const std::vector<Vertex> &vertices,
+                              const std::vector<uint32_t> &indices);
+
     VulkanContext &context_;
     vk::CommandPool transferPool_;
     TextureManager &textureManager_;
     Renderer &renderer_;
-    // Store as shared_ptr so RenderObjects can "own" their reference
-    std::unordered_map<std::string, std::shared_ptr<Model>> modelCache_;
+
+    std::unordered_map<std::string, std::shared_ptr<Mesh>> modelCache_;
+    std::shared_ptr<Mesh> sharedSphere_ = nullptr;
 };

@@ -9,8 +9,9 @@
 
 #include "../scene/Camera.hpp"
 #include "core/AssetManager.hpp"
-#include "scene/RenderObject.hpp"
+#include "scene/MeshInstance.hpp"
 #include "scene/TextureManager.hpp"
+#include "scene/PointLIght.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 class UserInterface;
@@ -47,8 +48,10 @@ private:
     std::unique_ptr<TextureManager> textureManager_;
     std::unique_ptr<AssetManager> assetManager_;
     std::unique_ptr<UserInterface> userInterface_;
-    std::shared_ptr<Model> sponzaModel_;
-    std::vector<RenderObject> renderObjects_;
+    std::vector<MeshInstance> renderObjects_;
+
+    // Point light data — positions derived from sphere MeshInstance transforms
+    std::vector<PointLight> pointLights_;
 
     void initWindow();
 
@@ -62,8 +65,10 @@ private:
 
     static void framebufferResizeCallback(GLFWwindow *window, int width, int height);
 
-    void updateFrameTime(); // Our new extracted function
+    void updateFrameTime();
     void loadScene();
+    void loadPointLights();
+
     // State variables for time tracking
     std::chrono::high_resolution_clock::time_point lastTime;
     float timer = 0.0f;
@@ -76,6 +81,4 @@ private:
     void renderUI() const;
     void processInput();
     void update(float dt);
-
-
 };
