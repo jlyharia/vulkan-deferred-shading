@@ -100,26 +100,26 @@ void App::loadPointLights() {
     const std::vector<LightDef> defs = {
         {glm::vec3(4.0f, 3.5f, -3.0f), 8.0f, glm::vec3(1.0f, 0.45f, 0.1f), 6.0f}, // warm orange
         {glm::vec3(10.0f, 3.5f, -3.0f), 8.0f, glm::vec3(1.0f, 0.45f, 0.1f), 6.0f}, // warm orange
-        {glm::vec3(6.0f, 1.0f, 2.0f), 6.0f, glm::vec3(0.4f, 0.6f, 1.0f), 8.0f},   // cool blue
-        {glm::vec3(8.5f, 1.0f, 2.0f), 6.0f, glm::vec3(0.4f, 0.6f, 1.0f), 8.0f},   // cool blue
+        {glm::vec3(6.0f, 1.0f, 2.0f), 6.0f, glm::vec3(0.4f, 0.6f, 1.0f), 8.0f}, // cool blue
+        {glm::vec3(8.5f, 1.0f, 2.0f), 6.0f, glm::vec3(0.4f, 0.6f, 1.0f), 8.0f}, // cool blue
     };
 
     auto sphereMesh = assetManager_->getSharedSphere();
 
     for (size_t i = 0; i < defs.size(); ++i) {
         MeshInstance lightObj;
-        lightObj.mesh  = sphereMesh;
-        lightObj.name  = "PointLight_" + std::to_string(i);
+        lightObj.mesh = sphereMesh;
+        lightObj.name = "PointLight_" + std::to_string(i);
         lightObj.color = glm::vec4(defs[i].color, 1.0f);
         lightObj.transform.setPosition(defs[i].position);
-        lightObj.transform.setScale(glm::vec3(0.2f));
+        lightObj.transform.setScale(glm::vec3(0.05f));
         lightObj.transform.updateMatrix();
         renderObjects_.push_back(lightObj);
 
         const glm::vec3 worldPos = renderObjects_.back().transform.position;
         PointLight pl{
             .position = glm::vec4(worldPos, defs[i].intensity),
-            .color    = glm::vec4(defs[i].color, defs[i].radius)
+            .color = glm::vec4(defs[i].color, defs[i].radius)
         };
         pointLights_.push_back(pl);
     }
@@ -156,13 +156,12 @@ void App::renderUI() const {
     ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockspace_flags);
     ImGui::Begin("Performance Monitor");
 
-    float frameTimeMs = deltaTime * 1000.0f;
-    ImGui::Text("Frame Time: %.3f ms", frameTimeMs);
-    ImGui::Text("FPS: %.1f", 1.0f / (deltaTime > 0.0f ? deltaTime : 0.001f));
+    ImGui::Text("Frame Time: %.3f ms", avgFrameTimeMs_);
+    ImGui::Text("FPS: %.1f", avgFrameTimeMs_ > 0.0f ? 1000.0f / avgFrameTimeMs_ : 0.0f);
 
     static float history[60] = {0};
     static int offset = 0;
-    history[offset] = frameTimeMs;
+    history[offset] = avgFrameTimeMs_;
     offset = (offset + 1) % 60;
     ImGui::PlotLines("Latency", history, 60, offset, nullptr, 0.0f, 33.3f, ImVec2(0, 50));
 
@@ -198,12 +197,17 @@ void App::updateFrameTime() {
     deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
     lastTime = currentTime;
 
+    frameTimeAccum_ += deltaTime;
+    frameCount_++;
+
     timer += deltaTime;
     if (timer >= 1.0f) {
-        const float frameTimeMs = deltaTime * 1000.0f;
-        const std::string title = "Vulkan Engine | " + std::to_string(frameTimeMs) + " ms";
+        avgFrameTimeMs_ = (frameTimeAccum_ / frameCount_) * 1000.0f;
+        const std::string title = "Vulkan Engine | " + std::to_string(avgFrameTimeMs_) + " ms";
         glfwSetWindowTitle(window_, title.c_str());
-        timer = 0.0f;
+        frameTimeAccum_ = 0.0f;
+        frameCount_     = 0;
+        timer           = 0.0f;
     }
 }
 
