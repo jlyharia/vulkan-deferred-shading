@@ -2,7 +2,7 @@
 // Created by johnny on 12/25/25.
 //
 
-#include "swap_chain.hpp"
+#include "SwapChain.hpp"
 #include "VulkanContext.hpp"
 #include "VulkanUtils.hpp"
 

@@ -1,8 +1,8 @@
 #include "VulkanContext.hpp"
 #include "common/VulkanInclude.hpp"
 #include "Validation.hpp"
-#include "swap_chain.hpp"
-#include "common/config.hpp"
+#include "SwapChain.hpp"
+#include "common/Config.hpp"
 
 #include <iostream>
 #include <map>

@@ -3,7 +3,7 @@
 //
 #pragma once
 
-#include "renderer/renderer.hpp"
+#include "renderer/Renderer.hpp"
 #include "scene/TextureManager.hpp"
 
 #include <unordered_map>

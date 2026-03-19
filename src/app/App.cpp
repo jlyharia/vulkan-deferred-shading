@@ -2,15 +2,15 @@
 // Created by johnny on 12/21/25.
 //
 
-#include "app.hpp"
+#include "App.hpp"
 
 #include <stdexcept>
 
-#include "renderer/renderer.hpp"
+#include "renderer/Renderer.hpp"
 #include "renderer/UserInterface.hpp"
 #include "scene/Mesh.hpp"
-#include "vulkan/graphics_pipeline.hpp"
-#include "vulkan/swap_chain.hpp"
+#include "vulkan/GraphicsPipeline.hpp"
+#include "vulkan/SwapChain.hpp"
 
 #include <imgui.h>
 

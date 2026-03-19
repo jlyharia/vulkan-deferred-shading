@@ -1,7 +1,7 @@
-#include "graphics_pipeline.hpp"
+#include "GraphicsPipeline.hpp"
 #include "VulkanContext.hpp"
 #include "../common/Vertex.hpp"
-#include "swap_chain.hpp"
+#include "SwapChain.hpp"
 #include "common/PushConstantConstant.hpp"
 
 #include <fstream>
