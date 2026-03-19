@@ -32,10 +32,18 @@ Step
 6. conan build command `conan install . --output-folder=build --build=missing`
 
 ## Todo
-1. Delete vulkan resources per frame.
-2. Move vulkan resource destroy into queue.
+- Delete vulkan resources per frame.
+- Move vulkan resource destroy into queue.
    PBR Shader	Hard	Adds realistic metal, roughness, and light math.
-   Shadow Maps	Very Hard	Adds actual shadows cast by the arches onto the floor.
+   Shadow Maps	Very Hard	Adds actual shadows cast by the arches onto the floor. 
+- Use RenderDoc obsessively — capture frames, profile bandwidth, show in your portfolio that you measure, not just implement.
+- Write a short technical blog or README explaining your trade-offs. Staff engineers can write — use that edge.
+- Target the right companies — middleware (Autodesk, Unity, Epic, AMD, Intel graphics teams), simulation, VFX (Pixar, ILM), or
+   graphics-heavy startups. AAA studios are hardest to break into cold. 
+- LinkedIn signal — update your title to include "Graphics Programming" or similar now, so recruiters start finding you.
+
+claude --resume bd37c0f9-857c-4b48-b801-74e0af6b92e3
+
 # What I have done
 1. Vulkan 1.3
 2. Dynamic Rendering

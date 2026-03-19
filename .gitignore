@@ -3,3 +3,4 @@ build
 cmake-build-debug
 CMakeUserPresets.json
 conan_provider.cmake
+claude/local

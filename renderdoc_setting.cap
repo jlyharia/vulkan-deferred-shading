@@ -1,0 +1,40 @@
+{
+    "rdocCaptureSettings": 1,
+    "settings": {
+        "autoStart": false,
+        "commandLine": "",
+        "environment": [
+            {
+                "separator": "Platform style",
+                "type": "Set",
+                "value": "/home/johnny/VulkanSDK/1.4.335.0/x86_64/share/vulkan/explicit_layer.d",
+                "variable": "VK_LAYER_PATH"
+            },
+            {
+                "separator": "Platform style",
+                "type": "Set",
+                "value": "/home/johnny/VulkanSDK/1.4.335.0/x86_64/lib",
+                "variable": "LD_LIBRARY_PATH"
+            }
+        ],
+        "executable": "/home/johnny/Code/defer_render/cmake-build-debug/defer_render",
+        "inject": false,
+        "numQueuedFrames": 0,
+        "options": {
+            "allowFullscreen": true,
+            "allowVSync": true,
+            "apiValidation": false,
+            "captureAllCmdLists": false,
+            "captureCallstacks": false,
+            "captureCallstacksOnlyDraws": false,
+            "debugOutputMute": true,
+            "delayForDebugger": 0,
+            "hookIntoChildren": false,
+            "refAllResources": false,
+            "softMemoryLimit": 0,
+            "verifyBufferAccess": false
+        },
+        "queuedFrameCap": 0,
+        "workingDir": ""
+    }
+}

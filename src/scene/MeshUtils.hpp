@@ -2,13 +2,19 @@
 // Created by johnny on 3/16/26.
 //
 
-#ifndef DEFER_RENDER_MESHUTILS_HPP
-#define DEFER_RENDER_MESHUTILS_HPP
+#pragma once
+#include "common/VulkanInclude.hpp"
+#include "common/Vertex.hpp"
 
 
-class MeshUtils
-{
-};
 
+namespace vk_mesh {
+void generateSphere(float radius,
+                    uint32_t sectors,
+                    uint32_t stacks,
+                    std::vector<Vertex> &vertices,
+                    std::vector<uint32_t> &indices);
 
-#endif //DEFER_RENDER_MESHUTILS_HPP
+// Future shapes can go here too!
+// void generateCube(...);
+}

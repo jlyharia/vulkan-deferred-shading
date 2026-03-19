@@ -4,73 +4,55 @@
 
 #pragma once
 #include "common/VulkanInclude.hpp"
-#include "TextureManager.hpp"
 #include "common/Material.hpp"
 
-#include "common/Vertex.hpp"
-
-#include <string>
 #include <vector>
 #include <memory>
 
-
-class Renderer;
-struct Vertex;
-
 /**
- * The TextureManager should own the Texture resources,
- * while the Model should own the Descriptor Sets.
+ * A "dumb" GPU data container. Owns vertex/index buffers and a list of Materials.
+ * Does not know how to load files or upload data — AssetManager handles that.
+ * Texture lifetimes are managed by shared_ptr inside each Material.
  */
 class Model {
 public:
-    // Constructor takes the allocator so it can create/destroy its own buffers
-    // VmaAllocator is just a *pointer* to a struct.
-    // Copying a VmaAllocator is just copying 8 bytes (the memory address).
-    explicit Model(const VmaAllocator allocator, const vk::Device device)
-        : allocator_(allocator), device_(device) {
-    }
-
+    explicit Model(VmaAllocator allocator, vk::Device device);
     ~Model();
 
-    // Public API for the Renderer
-    bool loadFromFile(const std::string &filePath, TextureManager &textureManager, Renderer &renderer);
-    void uploadToGPU(vk::Device device, vk::Queue transferQueue, vk::CommandPool commandPool);
+    Model(const Model &) = delete;
+    Model &operator=(const Model &) = delete;
 
-    // Getters so the Renderer can bind these to the Command Buffer
+    // --- Called by AssetManager ---
+
+    /** @brief Receives the GPU buffer handles after AssetManager uploads geometry. */
+    void setGpuResources(vk::Buffer vertexBuf, VmaAllocation vertexAlloc,
+                         vk::Buffer indexBuf,  VmaAllocation indexAlloc,
+                         uint32_t indexCount);
+
+    /** @brief Appends a fully-assembled Material (with descriptor set) to this model. */
+    void addMaterial(const Material &material);
+
+    /** @brief Replaces the submesh list (called once after geometry upload). */
+    void setSubmeshes(std::vector<Submesh> submeshes);
+
+    // --- Renderer API ---
+
     [[nodiscard]] vk::Buffer getVertexBuffer() const { return vertexBuffer_.buffer; }
-    [[nodiscard]] vk::Buffer getIndexBuffer() const { return indexBuffer_.buffer; }
-    [[nodiscard]] uint32_t getIndexCount() const { return indexCount_; }
-
-    [[nodiscard]] const std::vector<Submesh> &getSubmeshes() const { return submeshes_; }
-    [[nodiscard]] const std::vector<Material> &getMaterials() const { return materials_; }
+    [[nodiscard]] vk::Buffer getIndexBuffer()  const { return indexBuffer_.buffer; }
+    [[nodiscard]] uint32_t   getIndexCount()   const { return indexCount_; }
+    [[nodiscard]] const std::vector<Submesh>  &getSubmeshes()  const { return submeshes_; }
+    [[nodiscard]] const std::vector<Material> &getMaterials()  const { return materials_; }
 
 private:
-    // Internal loaders
-    // GPU Data: Managed by VMA
     struct AllocatedBuffer {
-        vk::Buffer buffer = nullptr;
+        vk::Buffer    buffer     = nullptr;
         VmaAllocation allocation = nullptr;
     } vertexBuffer_, indexBuffer_;
 
-
-    bool loadGltf(const std::string &filePath, bool isBinary, TextureManager &textureManager, Renderer &renderer);
-
     VmaAllocator allocator_;
-    vk::Device device_;
+    vk::Device   device_;
+    uint32_t     indexCount_ = 0;
 
-    // Sponza Data
-    std::vector<Submesh> submeshes_;
+    std::vector<Submesh>  submeshes_;
     std::vector<Material> materials_;
-
-    // --- THE CRITICAL ADDITION ---
-    // This holds the actual GPU handles for images and views.
-    // Without this, your Material DescriptorSets will point to deleted textures.
-    std::vector<Texture> textures_;
-
-    // CPU Data: These replace the globals!
-    std::vector<Vertex> vertices_;
-    std::vector<uint32_t> indices_;
-
-    uint32_t indexCount_ = 0;
-
 };

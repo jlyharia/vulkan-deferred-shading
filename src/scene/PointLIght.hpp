@@ -2,7 +2,13 @@
 // Created by johnny on 3/16/26.
 //
 
-#ifndef DEFER_RENDER_POINTLIGHT_HPP
-#define DEFER_RENDER_POINTLIGHT_HPP
+#pragma once
+#include <glm/glm.hpp>
 
-#endif //DEFER_RENDER_POINTLIGHT_HPP
+struct PointLight {
+    // xyz = position, w = intensity
+    glm::vec4 position;
+
+    // rgb = color, w = radius (or attenuation range)
+    glm::vec4 color;
+};
