@@ -2,8 +2,8 @@
 #include <cstdlib>
 #include <exception>
 
-#include "app/app.hpp"
-#include "common/config.hpp"
+#include "app/App.hpp"
+#include "common/Config.hpp"
 
 int main() {
     App app(engineConfig::MAIN_WINDOW_WIDTH, engineConfig::MAIN_WINDOW_HEIGHT, "Vulkan Deferred Renderer");

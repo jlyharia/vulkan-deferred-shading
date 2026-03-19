@@ -2,7 +2,7 @@
 // Created by johnny on 12/29/25.
 //
 
-#include "renderer.hpp"
+#include "Renderer.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -13,12 +13,12 @@
 #include "../common/InstanceData.hpp"
 #include "UserInterface.hpp"
 #include "../common/Vertex.hpp"
-#include "common/config.hpp"
+#include "common/Config.hpp"
 #include "scene/Mesh.hpp"
-#include "vulkan/graphics_pipeline.hpp"
+#include "vulkan/GraphicsPipeline.hpp"
 #include "common/PushConstantConstant.hpp"
 #include "vulkan/VulkanContext.hpp"
-#include "vulkan/swap_chain.hpp"
+#include "vulkan/SwapChain.hpp"
 
 
 // The C++ Bindings Header

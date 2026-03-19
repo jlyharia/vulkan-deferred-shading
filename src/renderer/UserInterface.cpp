@@ -1,8 +1,8 @@
 #include "UserInterface.hpp"
 
-#include "common/config.hpp"
+#include "common/Config.hpp"
 #include "scene/Camera.hpp"
-#include "vulkan/swap_chain.hpp"
+#include "vulkan/SwapChain.hpp"
 
 #include <iostream>
 

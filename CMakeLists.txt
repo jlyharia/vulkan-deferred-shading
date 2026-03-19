@@ -49,19 +49,19 @@ message(STATUS "FIXED: ImGui Backend Dir: ${IMGUI_BACKEND_SRC_DIR}")
 # ------------------------------------------------------------
 add_executable(${TARGET_NAME}
         src/main.cpp
-        src/app/app.cpp
-        src/app/app.hpp
+        src/app/App.cpp
+        src/app/App.hpp
         src/vulkan/VulkanContext.cpp
         src/vulkan/VulkanContext.hpp
         src/vulkan/Validation.cpp
         src/vulkan/Validation.hpp
-        src/vulkan/swap_chain.cpp
-        src/vulkan/swap_chain.hpp
-        src/vulkan/graphics_pipeline.cpp
-        src/vulkan/graphics_pipeline.hpp
-        src/renderer/renderer.cpp
-        src/renderer/renderer.hpp
-        src/common/config.hpp
+        src/vulkan/SwapChain.cpp
+        src/vulkan/SwapChain.hpp
+        src/vulkan/GraphicsPipeline.cpp
+        src/vulkan/GraphicsPipeline.hpp
+        src/renderer/Renderer.cpp
+        src/renderer/Renderer.hpp
+        src/common/Config.hpp
         src/common/Vertex.hpp
         src/external/vma_impl.cpp
         src/common/Uniform.hpp
