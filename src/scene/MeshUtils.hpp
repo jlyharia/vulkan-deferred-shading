@@ -2,13 +2,14 @@
 // Created by johnny on 3/16/26.
 //
 
-#ifndef DEFER_RENDER_MESHUTILS_HPP
-#define DEFER_RENDER_MESHUTILS_HPP
+#pragma once
 
+#include <vector>
+#include "../common/Vertex.hpp"
 
-class MeshUtils
-{
-};
+namespace MeshUtils {
 
+void generateSphere(float radius, int sectorCount, int stackCount,
+                    std::vector<Vertex> &vertices, std::vector<uint32_t> &indices);
 
-#endif //DEFER_RENDER_MESHUTILS_HPP
+} // namespace MeshUtils

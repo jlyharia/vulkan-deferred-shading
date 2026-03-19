@@ -4,8 +4,9 @@
 #include <vector>
 
 #include "../scene/Camera.hpp"
+#include "common/Material.hpp"
 #include "scene/MeshInstance.hpp"
-#include "system/GltfLoader.hpp"
+#include "scene/PointLight.hpp"
 
 
 #include <memory>
@@ -39,7 +40,8 @@ public:
                    bool framebufferResized,
                    const Camera &camera,
                    const UserInterface &userInterface,
-                   const std::vector<MeshInstance> &meshInstances);
+                   const std::vector<MeshInstance> &meshInstances,
+                   const std::vector<PointLight> &pointLights);
 
     void recreateSwapChain() const;
 
@@ -86,7 +88,8 @@ private:
     void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const;
 
     void createUniformBuffers();
-    void updateUniformBuffer(uint32_t currentFrame, const Camera &camera) const;
+    void updateUniformBuffer(uint32_t currentFrame, const Camera &camera,
+                             const std::vector<PointLight> &pointLights) const;
     void createDescriptorPool();
     void createDescriptorSets();
 

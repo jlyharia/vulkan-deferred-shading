@@ -44,7 +44,7 @@ void App::initWindow() {
 
 void App::framebufferResizeCallback(GLFWwindow *window, int width, int height) {
     auto app = reinterpret_cast<App *>(glfwGetWindowUserPointer(window));
-    app->framebufferResized = true;
+    app->framebufferResized_ = true;
 }
 
 void App::initVulkan() {
@@ -174,7 +174,8 @@ void App::drawFrame() {
                              framebufferResized_,
                              camera,
                              *userInterface_,
-                             renderObjects_);
+                             renderObjects_,
+                             pointLights_);
     } catch (const std::runtime_error &e) {
         renderer_->recreateSwapChain();
     }

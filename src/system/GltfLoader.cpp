@@ -135,13 +135,10 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
     const float *bufferNormals = nullptr;
     const float *bufferTexCoords = nullptr;
     const float *bufferTangents = nullptr;
-    int posStride = 0, normStride = 0, texStride = 0;
+    int posStride = 0, normStride = 0, texStride = 0, tanStride = 0;
 
     uint32_t vertexStart = static_cast<uint32_t>(output.vertices.size());
 
-    for (auto &[name, index] : primitive.attributes) {
-        std::cout << "[Attr] " << name << std::endl;
-    }
     // --- 1. Extract Attributes ---
     if (primitive.attributes.contains("POSITION")) {
         const tinygltf::Accessor &acc = input.accessors[primitive.attributes.at("POSITION")];
@@ -174,7 +171,7 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
         const tinygltf::BufferView &view = input.bufferViews[acc.bufferView];
         bufferTangents = reinterpret_cast<const float *>(&(input.buffers[view.buffer].data[
             acc.byteOffset + view.byteOffset]));
-        // Note: Tangent stride is usually 4 floats (vec4)
+        tanStride = acc.ByteStride(view) / sizeof(float);
     }
 
     // --- NEW: Material Factor Capture ---
@@ -189,11 +186,6 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
             static_cast<float>(pbr.baseColorFactor[2])
             );
 
-        // DEBUG: Uncomment this to verify the arches are actually being assigned a color
-        if (baseColorFactor.r < 1.0f) {
-            std::cout << "[GltfLoader] Material " << primitive.material << " Factor: "
-                << baseColorFactor.r << ", " << baseColorFactor.g << std::endl;
-        }
     }
 
     // --- 2. Calculate Normal Matrix ---
@@ -225,13 +217,9 @@ void GltfLoader::processPrimitive(const tinygltf::Model &input,
         // Color (Location 3)
         // This MUST be set to the baseColorFactor for the arches to show stone color
         vert.color = baseColorFactor;
-        if (primitive.material == 5) // or whichever arch material
-        {
-            std::cout << "UV: " << vert.uv.x << ", " << vert.uv.y << std::endl;
-        }
 
         if (bufferTangents) {
-            vert.tangent = glm::make_vec4(&bufferTangents[v * 4]);
+            vert.tangent = glm::make_vec4(&bufferTangents[v * tanStride]);
             // Most glTF tangents are vec4; use the normalMatrix to rotate them
             vert.tangent = glm::vec4(normalMatrix * glm::vec3(vert.tangent), vert.tangent.w);
         }
@@ -268,7 +256,6 @@ void GltfLoader::loadImages(const tinygltf::Model &model, MeshData &output) cons
     if (model.images.empty())
         return;
 
-    std::cout << "[glTF] Scanning " << model.images.size() << " textures..." << std::endl;
 
     // 1. Identify Data Maps (Normals, Metallic, Roughness)
     std::vector<bool> isDataMap(model.images.size(), false);
@@ -302,7 +289,5 @@ void GltfLoader::loadImages(const tinygltf::Model &model, MeshData &output) cons
             static_cast<uint32_t>(img.height),
             format);
 
-        std::cout << "  [Tex " << i << "] " << (isColor ? "sRGB" : "Unorm")
-            << " | " << img.name << std::endl;
     }
 }

@@ -304,7 +304,8 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
                          const bool framebufferResized,
                          const Camera &camera,
                          const UserInterface &userInterface,
-                         const std::vector<MeshInstance> &meshInstances) {
+                         const std::vector<MeshInstance> &meshInstances,
+                         const std::vector<PointLight> &pointLights) {
     auto device = context_.getDevice();
 
     // 1. Wait for the Frame Slot to be free (CPU-GPU Sync)
@@ -334,7 +335,7 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
     // 4. Reset Fence and Record Commands
     device.resetFences(inFlightFences_[currentFrame]);
 
-    updateUniformBuffer(currentFrame, camera);
+    updateUniformBuffer(currentFrame, camera, pointLights);
 
     commandBuffers_[currentFrame].reset();
     recordCommandBuffer(commandBuffers_[currentFrame], graphicsPipeline, imageIndex, userInterface, meshInstances);
@@ -469,13 +470,18 @@ void Renderer::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::Device
     context_.getDevice().freeCommandBuffers(context_.getMainCommandPool(), cmd);
 }
 
-void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera) const {
-    GlobalUBO ubo{
-        .view = camera.getViewMatrix(),
-        .proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height),
-        .cameraPos = camera.position
-    };
-    std::memcpy(uniformBuffersMapped_[currentFrame], &ubo, sizeof(ubo));
+void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera,
+                                    const std::vector<PointLight> &pointLights) const {
+    GlobalUBO ubo{};
+    ubo.view      = camera.getViewMatrix();
+    ubo.proj      = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
+    ubo.cameraPos = glm::vec4(camera.position, 0.0f);
+
+    const size_t count = std::min(pointLights.size(), size_t{4});
+    for (size_t i = 0; i < count; ++i)
+        ubo.pointLights[i] = pointLights[i];
+
+    std::memcpy(uniformBuffersMapped_[currentImage], &ubo, sizeof(ubo));
 }
 
 void Renderer::createDescriptorPool() {
