@@ -43,10 +43,10 @@ Step
 - Gltf 
 - Mipmapping 
 - Normal Mapping 
-- add 4 spheres object to indicate point light
+- add 4 spheres object to indicate point light and using ssbo to reduce attribute count in shader
 - pbr without image based lighting
-   - horizontal grid plan
-   - more objects for deferred shading
+- horizontal grid plan
+- more objects for deferred shading
 - 
 
 horizontal grid plan

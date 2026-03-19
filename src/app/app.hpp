@@ -69,8 +69,11 @@ private:
 
     // State variables for time tracking
     std::chrono::high_resolution_clock::time_point lastTime;
-    float timer = 0.0f;
-    float deltaTime = 0.0f;
+    float timer            = 0.0f;
+    float deltaTime        = 0.0f;
+    float frameTimeAccum_  = 0.0f;
+    int   frameCount_      = 0;
+    float avgFrameTimeMs_  = 0.0f;
 
     bool framebufferResized_ = false;
 
