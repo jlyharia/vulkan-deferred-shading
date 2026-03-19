@@ -71,6 +71,7 @@ void App::initVulkan() {
         textureManager_->getDefaultSampler());
 
     loadScene();
+    renderer_->setSphereMesh(assetManager_->getSharedSphere());
 }
 
 void App::loadScene() {

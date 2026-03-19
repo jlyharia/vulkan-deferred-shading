@@ -5,6 +5,7 @@
 
 #include "../scene/Camera.hpp"
 #include "common/Material.hpp"
+#include "common/InstanceData.hpp"
 #include "scene/MeshInstance.hpp"
 #include "scene/PointLight.hpp"
 
@@ -63,6 +64,9 @@ public:
                               vk::ImageView normalView,
                               vk::ImageView blackView,
                               vk::Sampler sampler);
+
+    void setSphereMesh(std::shared_ptr<Mesh> mesh) { sphereMesh_ = std::move(mesh); }
+
 private:
     void createCommandBuffers();
     void createSyncObjects();
@@ -71,11 +75,13 @@ private:
                              const GraphicsPipeline &graphicsPipeline,
                              uint32_t imageIndex,
                              const UserInterface &userInterface,
-                             const std::vector<MeshInstance> &meshInstances) const;
+                             const std::vector<MeshInstance> &meshInstances,
+                             uint32_t instanceCount) const;
     void renderScene(vk::CommandBuffer cmd,
                      const GraphicsPipeline &graphicsPipeline,
                      uint32_t imageIndex,
-                     const std::vector<MeshInstance> &meshInstances) const;
+                     const std::vector<MeshInstance> &meshInstances,
+                     uint32_t instanceCount) const;
     [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryColorAttachment(uint32_t imageIndex) const;
     [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryDepthAttachment() const;
     void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
@@ -90,6 +96,9 @@ private:
     void createUniformBuffers();
     void updateUniformBuffer(uint32_t currentFrame, const Camera &camera,
                              const std::vector<PointLight> &pointLights) const;
+    void createInstanceBuffers();
+    [[nodiscard]] uint32_t updateInstanceBuffer(uint32_t currentFrame,
+                                                const std::vector<MeshInstance> &meshInstances) const;
     void createDescriptorPool();
     void createDescriptorSets();
 
@@ -120,6 +129,13 @@ private:
     std::vector<vk::Buffer> uniformBuffers_;
     std::vector<VmaAllocation> uniformBuffersAllocation_;
     std::vector<void *> uniformBuffersMapped_;
+
+    // Instance Resources
+    std::vector<vk::Buffer> instanceBuffers_;
+    std::vector<VmaAllocation> instanceAllocations_;
+    std::vector<void *> instanceBuffersMapped_;
+
+    std::shared_ptr<Mesh> sphereMesh_;
 
     // Descriptors (C++ style)
     vk::DescriptorPool descriptorPool_;

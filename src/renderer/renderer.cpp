@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "../common/Uniform.hpp"
+#include "../common/InstanceData.hpp"
 #include "UserInterface.hpp"
 #include "../common/Vertex.hpp"
 #include "common/config.hpp"
@@ -80,6 +81,14 @@ Renderer::~Renderer() {
             uniformBuffersAllocation_[i] = nullptr;
             uniformBuffersMapped_[i] = nullptr;
         }
+
+        if (instanceBuffers_[i] != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(context_.getVmaAllocator(), instanceBuffers_[i], instanceAllocations_[i]);
+
+            instanceBuffers_[i] = VK_NULL_HANDLE;
+            instanceAllocations_[i] = nullptr;
+            instanceBuffersMapped_[i] = nullptr;
+        }
     }
 
     // 2. Destroy Fences (Per Frame Slot)
@@ -100,6 +109,7 @@ Renderer::~Renderer() {
 
 void Renderer::initResources() {
     createUniformBuffers();
+    createInstanceBuffers();
     createDescriptorPool();
     createDescriptorSets();
 }
@@ -121,7 +131,8 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
                                    const GraphicsPipeline &graphicsPipeline,
                                    const uint32_t imageIndex,
                                    const UserInterface &userInterface,
-                                   const std::vector<MeshInstance> &meshInstances) const {
+                                   const std::vector<MeshInstance> &meshInstances,
+                                   const uint32_t instanceCount) const {
     // 1. Setup
     auto beginInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     cmd.begin(beginInfo);
@@ -130,7 +141,7 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
         prepareFrameImages(cmd, imageIndex);
 
         // 3. Main Geometry Pass
-        renderScene(cmd, graphicsPipeline, imageIndex, meshInstances);
+        renderScene(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
 
         // 4. UI Pass (ImGui)
         // Note: UserInterface handles its own begin/endRendering internally
@@ -145,7 +156,8 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
 void Renderer::renderScene(const vk::CommandBuffer cmd,
                            const GraphicsPipeline &graphicsPipeline,
                            const uint32_t imageIndex,
-                           const std::vector<MeshInstance> &meshInstances) const {
+                           const std::vector<MeshInstance> &meshInstances,
+                           const uint32_t instanceCount) const {
 
     auto colorAttachment = getPrimaryColorAttachment(imageIndex);
     auto depthAttachment = getPrimaryDepthAttachment();
@@ -177,10 +189,12 @@ void Renderer::renderScene(const vk::CommandBuffer cmd,
 
         vk::Pipeline currentPipeline = nullptr;
 
-        // --- THE OBJECT LOOP ---
+        // --- NON-INSTANCED PASS: everything except sphere instances ---
         for (const auto &[mesh, transform, name, color] : meshInstances) {
             if (!mesh)
                 continue;
+            if (sphereMesh_ && mesh == sphereMesh_)
+                continue; // drawn in the instanced pass below
 
             vk::DeviceSize offsets[] = {0};
             cmd.bindVertexBuffers(0, {mesh->getVertexBuffer()}, offsets);
@@ -224,6 +238,22 @@ void Renderer::renderScene(const vk::CommandBuffer cmd,
                 }
 
                 cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
+            }
+        }
+
+        // --- INSTANCED PASS: all sphere instances in one draw call ---
+        if (sphereMesh_ && instanceCount > 0) {
+            vk::DeviceSize offset = 0;
+            cmd.bindVertexBuffers(0, {sphereMesh_->getVertexBuffer()}, {offset});
+            cmd.bindIndexBuffer(sphereMesh_->getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+            const vk::Pipeline unlitPipeline = graphicsPipeline.getUnlitPipeline();
+            if (unlitPipeline != currentPipeline) {
+                cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, unlitPipeline);
+            }
+
+            for (const auto &submesh : sphereMesh_->getSubmeshes()) {
+                cmd.drawIndexed(submesh.indexCount, instanceCount, submesh.firstIndex, 0, 0);
             }
         }
     }
@@ -336,9 +366,11 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
     device.resetFences(inFlightFences_[currentFrame]);
 
     updateUniformBuffer(currentFrame, camera, pointLights);
+    const uint32_t instanceCount = updateInstanceBuffer(currentFrame, meshInstances);
 
     commandBuffers_[currentFrame].reset();
-    recordCommandBuffer(commandBuffers_[currentFrame], graphicsPipeline, imageIndex, userInterface, meshInstances);
+    recordCommandBuffer(commandBuffers_[currentFrame], graphicsPipeline, imageIndex, userInterface, meshInstances,
+                        instanceCount);
 
     // 5. Submit Info (Modern C++ Style)
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
@@ -425,6 +457,47 @@ void Renderer::createUniformBuffers() {
     }
 }
 
+void Renderer::createInstanceBuffers() {
+    constexpr uint32_t MAX_INSTANCES = 64;
+    const vk::DeviceSize bufferSize  = MAX_INSTANCES * sizeof(InstanceData);
+
+    instanceBuffers_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
+    instanceAllocations_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
+    instanceBuffersMapped_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
+        VmaAllocationInfo allocInfo;
+        createBuffer(bufferSize,
+                     vk::BufferUsageFlagBits::eStorageBuffer,
+                     VMA_MEMORY_USAGE_CPU_TO_GPU,
+                     instanceBuffers_[i],
+                     instanceAllocations_[i],
+                     VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                     &allocInfo);
+
+        instanceBuffersMapped_[i] = allocInfo.pMappedData;
+    }
+}
+
+uint32_t Renderer::updateInstanceBuffer(const uint32_t currentFrame,
+                                         const std::vector<MeshInstance> &meshInstances) const {
+    if (!sphereMesh_)
+        return 0;
+
+    std::vector<InstanceData> instances;
+    for (const auto &[mesh, transform, name, color] : meshInstances) {
+        if (mesh == sphereMesh_)
+            instances.push_back({transform.modelMatrix, color});
+    }
+
+    if (!instances.empty()) {
+        std::memcpy(instanceBuffersMapped_[currentFrame], instances.data(),
+                    instances.size() * sizeof(InstanceData));
+    }
+
+    return static_cast<uint32_t>(instances.size());
+}
+
 void Renderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage vmaUsage,
                             vk::Buffer &buffer, VmaAllocation &allocation, VmaAllocationCreateFlags vmaFlags,
                             VmaAllocationInfo *outAllocInfo) const {
@@ -490,13 +563,18 @@ void Renderer::createDescriptorPool() {
                                  .setType(vk::DescriptorType::eUniformBuffer)
                                  .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
 
-    // Pool Size 2: For the Texture Samplers (Set 1)
+    // Pool Size 2: For the Instance SSBO (Set 0, binding 1)
+    constexpr auto ssboPoolSize = vk::DescriptorPoolSize()
+                                  .setType(vk::DescriptorType::eStorageBuffer)
+                                  .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
+
+    // Pool Size 3: For the Texture Samplers (Set 1)
     // Sponza has ~80 materials; let's reserve 200
     constexpr auto samplerPoolSize = vk::DescriptorPoolSize()
                                      .setType(vk::DescriptorType::eCombinedImageSampler)
                                      .setDescriptorCount(200);
 
-    std::array<vk::DescriptorPoolSize, 2> poolSizes = {uboPoolSize, samplerPoolSize};
+    std::array<vk::DescriptorPoolSize, 3> poolSizes = {uboPoolSize, ssboPoolSize, samplerPoolSize};
     // samplerPoolSize.descriptorCount +
     auto poolInfo = vk::DescriptorPoolCreateInfo()
                     .setPoolSizeCount(poolSizes.size())
@@ -516,20 +594,32 @@ void Renderer::createDescriptorSets() {
     descriptorSets_ = context_.getDevice().allocateDescriptorSets(allocInfo);
 
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
-        auto bufferInfo =
-            vk::DescriptorBufferInfo()
-            .setBuffer(uniformBuffers_[i])
-            .setOffset(0)
-            .setRange(sizeof(GlobalUBO));
+        auto uboInfo = vk::DescriptorBufferInfo()
+                       .setBuffer(uniformBuffers_[i])
+                       .setOffset(0)
+                       .setRange(sizeof(GlobalUBO));
 
-        auto descriptorWrite = vk::WriteDescriptorSet()
-                               .setDstSet(descriptorSets_[i])
-                               .setDstBinding(0)
-                               .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                               .setDescriptorCount(1)
-                               .setPBufferInfo(&bufferInfo);
+        auto ssboInfo = vk::DescriptorBufferInfo()
+                        .setBuffer(instanceBuffers_[i])
+                        .setOffset(0)
+                        .setRange(64 * sizeof(InstanceData));
 
-        context_.getDevice().updateDescriptorSets(descriptorWrite, nullptr);
+        std::array<vk::WriteDescriptorSet, 2> writes = {
+            vk::WriteDescriptorSet()
+                .setDstSet(descriptorSets_[i])
+                .setDstBinding(0)
+                .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                .setDescriptorCount(1)
+                .setPBufferInfo(&uboInfo),
+            vk::WriteDescriptorSet()
+                .setDstSet(descriptorSets_[i])
+                .setDstBinding(1)
+                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+                .setDescriptorCount(1)
+                .setPBufferInfo(&ssboInfo),
+        };
+
+        context_.getDevice().updateDescriptorSets(writes, nullptr);
     }
 }
 
@@ -594,15 +684,24 @@ vk::DescriptorSet Renderer::createTextureDescriptorSet(
 void Renderer::createDescriptorSetLayout() {
     auto device = context_.getDevice();
 
-    // --- [SET 0]: GLOBAL DATA (Camera/UBO) ---
+    // --- [SET 0]: GLOBAL DATA (Camera/UBO + Instance SSBO) ---
     {
-        auto uboBinding = vk::DescriptorSetLayoutBinding()
-                          .setBinding(0)
-                          .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                          .setDescriptorCount(1)
-                          .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
+        std::array<vk::DescriptorSetLayoutBinding, 2> globalBindings = {
+            // Binding 0: Camera UBO
+            vk::DescriptorSetLayoutBinding()
+                .setBinding(0)
+                .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment),
+            // Binding 1: Instance SSBO
+            vk::DescriptorSetLayoutBinding()
+                .setBinding(1)
+                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eVertex),
+        };
 
-        vk::DescriptorSetLayoutCreateInfo globalInfo({}, uboBinding);
+        vk::DescriptorSetLayoutCreateInfo globalInfo({}, globalBindings);
         globalDescriptorSetLayout_ = device.createDescriptorSetLayout(globalInfo);
     }
 
@@ -650,6 +749,14 @@ void Renderer::transitionImageLayout(const vk::CommandBuffer cmd,
                .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
                .setDstStageMask(vk::PipelineStageFlagBits2::eBottomOfPipe)
                .setDstAccessMask(vk::AccessFlagBits2::eNone);
+    } else if (newLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal) {
+        barrier.setSrcStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                                vk::PipelineStageFlagBits2::eLateFragmentTests)
+               .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+               .setDstStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                                vk::PipelineStageFlagBits2::eLateFragmentTests)
+               .setDstAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentRead |
+                                 vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
     }
 
     vk::DependencyInfo dependencyInfo;
