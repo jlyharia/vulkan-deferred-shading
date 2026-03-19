@@ -88,6 +88,7 @@ add_executable(${TARGET_NAME}
         src/vulkan/VulkanUtils.cpp
         src/common/Material.hpp
         src/common/PushConstantConstant.hpp
+        src/common/InstanceData.hpp
         src/scene/PointLight.hpp
         src/scene/MeshUtils.cpp
         src/scene/MeshUtils.hpp

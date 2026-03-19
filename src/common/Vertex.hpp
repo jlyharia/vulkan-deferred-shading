@@ -11,7 +11,7 @@ struct Vertex {
     glm::vec3 normal; // Location 1
     glm::vec2 uv; // Location 2
     glm::vec3 color; // Location 3
-    glm::vec4 tangent;
+    glm::vec4 tangent; // Location 4
 
     // Helper function to tell Vulkan how to read this struct
     static vk::VertexInputBindingDescription getBindingDescription() {
