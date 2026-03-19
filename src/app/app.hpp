@@ -11,7 +11,7 @@
 #include "core/AssetManager.hpp"
 #include "scene/MeshInstance.hpp"
 #include "scene/TextureManager.hpp"
-#include "scene/PointLIght.hpp"
+#include "scene/PointLight.hpp"
 #include "vulkan/VulkanContext.hpp"
 
 class UserInterface;
@@ -61,8 +61,6 @@ private:
 
     void drawFrame();
 
-    bool framebufferResized = false;
-
     static void framebufferResizeCallback(GLFWwindow *window, int width, int height);
 
     void updateFrameTime();
@@ -75,8 +73,6 @@ private:
     float deltaTime = 0.0f;
 
     bool framebufferResized_ = false;
-
-    std::chrono::time_point<std::chrono::high_resolution_clock> lastFrameTime;
 
     void renderUI() const;
     void processInput();

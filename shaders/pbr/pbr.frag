@@ -8,10 +8,16 @@ layout (location = 4) in vec4 inTangent;
 
 layout (location = 0) out vec4 outColor;
 
+struct PointLight {
+    vec4 position; // xyz = world pos, w = intensity
+    vec4 color;    // xyz = RGB color, w = radius
+};
+
 layout (set = 0, binding = 0) uniform GlobalUBO {
     mat4 view;
     mat4 proj;
     vec4 cameraPos;
+    PointLight pointLights[4];
 } ubo;
 
 layout (set = 1, binding = 0) uniform sampler2D albedoMap;
@@ -27,9 +33,9 @@ const float PI = 3.14159265359;
 
 // GGX / Trowbridge-Reitz normal distribution
 float distributionGGX(float NdotH, float roughness) {
-    float a  = roughness * roughness;
+    float a = roughness * roughness;
     float a2 = a * a;
-    float d  = NdotH * NdotH * (a2 - 1.0) + 1.0;
+    float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
     return a2 / (PI * d * d);
 }
 
@@ -53,14 +59,14 @@ void main() {
     // --- Sample textures ---
     vec4 albedoSample = texture(albedoMap, fragTexCoord) * pc.baseColorFactor;
     if (albedoSample.a < 0.1)
-        discard;
+    discard;
 
     vec3 albedo = pow(albedoSample.rgb, vec3(2.2)); // sRGB → linear
 
     // glTF: R=occlusion, G=roughness, B=metallic
-    vec4 mrSample  = texture(metallicRoughnessMap, fragTexCoord);
+    vec4 mrSample = texture(metallicRoughnessMap, fragTexCoord);
     float roughness = clamp(mrSample.g, 0.04, 1.0);
-    float metallic  = clamp(mrSample.b, 0.0,  1.0);
+    float metallic = clamp(mrSample.b, 0.0, 1.0);
 
     // --- Normal mapping ---
     vec3 N = normalize(fragNormal);
@@ -74,31 +80,39 @@ void main() {
     N = normalize(TBN * normalize(localNormal));
 
     // --- Lighting setup ---
-    vec3 V   = normalize(ubo.cameraPos.xyz - fragPos);
-    vec3 L   = normalize(vec3(-1.0, -2.0, 3.0)); // directional light direction
-    vec3 H   = normalize(V + L);
-    vec3 lightColor = vec3(3.0); // white directional light, intensity 3
-
-    float NdotL = max(dot(N, L), 0.0);
+    vec3 V = normalize(ubo.cameraPos.xyz - fragPos);
     float NdotV = max(dot(N, V), 0.0001);
-    float NdotH = max(dot(N, H), 0.0);
-    float HdotV = max(dot(H, V), 0.0);
 
-    // --- Cook-Torrance BRDF ---
-    // F0: base reflectivity (dialectric = 0.04, metal uses albedo)
+    // F0: base reflectivity (dielectric = 0.04, metal uses albedo)
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
-    float D = distributionGGX(NdotH, roughness);
-    float G = geometrySmith(NdotV, NdotL, roughness);
-    vec3  F = fresnelSchlick(HdotV, F0);
+    vec3 Lo = vec3(0.0);
+    for (int i = 0; i < 4; i++) {
+        vec3 Ldir = ubo.pointLights[i].position.xyz - fragPos;
+        float dist = length(Ldir);
+        vec3 L = normalize(Ldir);
+        vec3 H = normalize(V + L);
+        float intensity = ubo.pointLights[i].position.w;
+        vec3 lightColor = ubo.pointLights[i].color.xyz;
 
-    vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
+        float attenuation = intensity / (dist * dist);
+        vec3 radiance = lightColor * attenuation;
 
-    // Energy conservation: diffuse only on non-metal
-    vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
-    vec3 diffuse = kD * albedo / PI;
+        float NdotL = max(dot(N, L), 0.0);
+        float NdotH = max(dot(N, H), 0.0);
+        float HdotV = max(dot(H, V), 0.0);
 
-    vec3 Lo = (diffuse + specular) * lightColor * NdotL;
+        // --- Cook-Torrance BRDF ---
+        float D = distributionGGX(NdotH, roughness);
+        float G = geometrySmith(NdotV, NdotL, roughness);
+        vec3 F = fresnelSchlick(HdotV, F0);
+
+        vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
+        vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+        vec3 diffuse = kD * albedo / PI;
+
+        Lo += (diffuse + specular) * radiance * NdotL;
+    }
 
     // Ambient (simple approximation)
     vec3 ambient = vec3(0.03) * albedo;

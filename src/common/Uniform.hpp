@@ -4,16 +4,11 @@
 
 #pragma once
 #include <glm/glm.hpp>
-
-struct UniformBufferObject {
-    alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
-};
-
+#include "scene/PointLight.hpp"
 
 struct GlobalUBO {
-    alignas(16)glm::mat4 view;
-    alignas(16)glm::mat4 proj;
-    alignas(16) glm::vec3 cameraPos;
-}; // move glm::mat4 model to push constant
+    alignas(16) glm::mat4      view;
+    alignas(16) glm::mat4      proj;
+    alignas(16) glm::vec4      cameraPos;       // xyz = position, w = unused
+    alignas(16) PointLight     pointLights[4];  // offset 144, matches GLSL std140
+};

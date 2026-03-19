@@ -57,7 +57,7 @@ std::shared_ptr<Mesh> AssetManager::getSharedSphere() {
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    vk_mesh::generateSphere(1.0f, 32, 32, vertices, indices);
+    MeshUtils::generateSphere(1.0f, 32, 32, vertices, indices);
 
     Material lightMat;
     lightMat.name                     = "Procedural_Light_Mat";
