@@ -47,7 +47,7 @@ Step
 - pbr without image based lighting
 - horizontal grid plan
 - more objects for deferred shading
-- 
+- Depth reconstruction
 
 horizontal grid plan
 Here is the recommended order: PBR → Shadow Mapping → Deferred Shading.

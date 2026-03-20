@@ -15,9 +15,9 @@ class Camera {
 public:
     // Position state
     glm::vec3 position;
-    glm::vec3 forward;
-    glm::vec3 up;
-    glm::vec3 right;
+    glm::vec3 forward{};
+    glm::vec3 up{};
+    glm::vec3 right{};
     const glm::vec3 worldUp = glm::vec3(0.0f, 0.0f, 1.0f);
 
     // Orientation state (Euler Angles)
@@ -25,12 +25,12 @@ public:
     float pitch; // Up/Down rotation
 
     // Camera Constants
-    float movementSpeed = 2.5f;
-    float mouseSensitivity = 0.3f;
+    float movementSpeed = 4.5f;
+    float mouseSensitivity = 0.7f;
     float fov = 45.0f;
 
-    Camera(glm::vec3 startPosition = glm::vec3(0.0f, 2.0f, 0.0f),
-           float startYaw = 0.0f, float startPitch = 0.0f)
+    explicit Camera(glm::vec3 startPosition = glm::vec3(0.0f, 2.0f, 0.0f),
+                    float startYaw = 0.0f, float startPitch = 0.0f)
         : position(startPosition), yaw(startYaw), pitch(startPitch) {
         updateCameraVectors();
     }

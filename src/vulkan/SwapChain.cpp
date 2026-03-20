@@ -152,16 +152,6 @@ void SwapChain::createImageViews() {
     }
 }
 
-// vk::ImageView SwapChain::createImageView(vk::Image image, vk::Format format, vk::ImageAspectFlags aspectFlags) const {
-//     auto viewInfo = vk::ImageViewCreateInfo()
-//                     .setImage(image)
-//                     .setViewType(vk::ImageViewType::e2D)
-//                     .setFormat(format)
-//                     .setSubresourceRange({aspectFlags, 0, 1, 0, 1});
-//
-//     return context_.getDevice().createImageView(viewInfo);
-// }
-
 
 void SwapChain::createDepthResources() {
     const vk::Format depthFormat = findDepthFormat();
@@ -187,40 +177,3 @@ vk::Format SwapChain::findDepthFormat() {
                vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment);
 }
 
-// void SwapChain::createImage(uint32_t width,
-//                             uint32_t height,
-//                             vk::Format format,
-//                             vk::ImageTiling tiling,
-//                             vk::ImageUsageFlags usage,
-//                             VmaMemoryUsage vmaUsage,
-//                             vk::Image &image,
-//                             VmaAllocation &allocation) const {
-//     // <--- Changed this type
-//
-//     auto imageInfo = vk::ImageCreateInfo()
-//                      .setImageType(vk::ImageType::e2D)
-//                      .setExtent({width, height, 1})
-//                      .setMipLevels(1)
-//                      .setArrayLayers(1)
-//                      .setFormat(format)
-//                      .setTiling(tiling)
-//                      .setInitialLayout(vk::ImageLayout::eUndefined)
-//                      .setUsage(usage)
-//                      .setSamples(vk::SampleCountFlagBits::e1)
-//                      .setSharingMode(vk::SharingMode::eExclusive);
-//
-//     VmaAllocationCreateInfo allocInfo = {};
-//     allocInfo.usage = vmaUsage;
-//
-//     VkImage rawImage;
-//     // Cast imageInfo to the raw C struct that VMA expects
-//     if (vmaCreateImage(context_.getVmaAllocator(),
-//                        reinterpret_cast<const VkImageCreateInfo *>(&imageInfo),
-//                        &allocInfo,
-//                        &rawImage,
-//                        &allocation, // <--- Correct pointer usage
-//                        nullptr) != VK_SUCCESS) {
-//         throw std::runtime_error("failed to create image with VMA!");
-//     }
-//     image = rawImage;
-// }

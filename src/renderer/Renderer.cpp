@@ -419,15 +419,8 @@ void Renderer::recreateSwapChain() const {
     // 2. Synchronize: Stop the GPU before we delete its tools
     vkDeviceWaitIdle(context_.getDevice());
 
-    // 3. Cleanup size-dependent resources
-    // cleanupDepthResources();
-    // Framebuffers are cleaned inside SwapChain::cleanup() which we trigger next
-
-    // 4. Recreate SwapChain (This updates images and views)
+    // 3. Recreate SwapChain (updates images, views, and depth resources)
     swapChain_.recreate();
-
-    // 5. Recreate Renderer resources with the NEW extent
-    // createDepthResources();
 
     // Note: Since we use Dynamic State for Viewport/Scissor,
     // we do NOT need to recreate the Pipeline!
@@ -550,7 +543,7 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera,
     ubo.proj      = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
     ubo.cameraPos = glm::vec4(camera.position, 0.0f);
 
-    const size_t count = std::min(pointLights.size(), size_t{4});
+    const size_t count = std::min(pointLights.size(), size_t{24});
     for (size_t i = 0; i < count; ++i)
         ubo.pointLights[i] = pointLights[i];
 
@@ -575,7 +568,6 @@ void Renderer::createDescriptorPool() {
                                      .setDescriptorCount(200);
 
     std::array<vk::DescriptorPoolSize, 3> poolSizes = {uboPoolSize, ssboPoolSize, samplerPoolSize};
-    // samplerPoolSize.descriptorCount +
     auto poolInfo = vk::DescriptorPoolCreateInfo()
                     .setPoolSizeCount(poolSizes.size())
                     .setPoolSizes(poolSizes)

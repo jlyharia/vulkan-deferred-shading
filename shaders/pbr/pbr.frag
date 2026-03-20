@@ -17,7 +17,7 @@ layout (set = 0, binding = 0) uniform GlobalUBO {
     mat4 view;
     mat4 proj;
     vec4 cameraPos;
-    PointLight pointLights[4];
+    PointLight pointLights[24];
 } ubo;
 
 layout (set = 1, binding = 0) uniform sampler2D albedoMap;
@@ -87,7 +87,7 @@ void main() {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
     vec3 Lo = vec3(0.0);
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 24; i++) {
         vec3 Ldir = ubo.pointLights[i].position.xyz - fragPos;
         float dist = length(Ldir);
         vec3 L = normalize(Ldir);

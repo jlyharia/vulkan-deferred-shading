@@ -10,5 +10,5 @@ struct GlobalUBO {
     alignas(16) glm::mat4      view;
     alignas(16) glm::mat4      proj;
     alignas(16) glm::vec4      cameraPos;       // xyz = position, w = unused
-    alignas(16) PointLight     pointLights[4];  // offset 144, matches GLSL std140
+    alignas(16) PointLight     pointLights[24]; // offset 144, matches GLSL std140
 };
