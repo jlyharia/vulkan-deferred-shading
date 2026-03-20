@@ -1,11 +1,6 @@
 #version 450
 
-layout (location = 0) in vec3 fragPos;
-layout (location = 1) in vec3 fragNormal;
-layout (location = 2) in vec3 fragColor;
-layout (location = 3) in vec2 fragTexCoord;
-layout (location = 4) in vec4 inTangent;
-
+layout (location = 0) in vec2 inUV;
 layout (location = 0) out vec4 outColor;
 
 struct PointLight {
@@ -13,6 +8,7 @@ struct PointLight {
     vec4 color;    // xyz = RGB color, w = radius
 };
 
+// GlobalUBO must match C++ GlobalUBO struct layout (std140)
 layout (set = 0, binding = 0) uniform GlobalUBO {
     mat4 view;
     mat4 proj;
@@ -22,16 +18,14 @@ layout (set = 0, binding = 0) uniform GlobalUBO {
     PointLight pointLights[24];
 } ubo;
 
-layout (set = 1, binding = 0) uniform sampler2D albedoMap;
-layout (set = 1, binding = 1) uniform sampler2D normalMap;
-layout (set = 1, binding = 2) uniform sampler2D metallicRoughnessMap;
-
-layout (push_constant) uniform Push {
-    mat4 model;
-    vec4 baseColorFactor;
-} pc;
+// G-buffer inputs (set 2)
+layout (set = 2, binding = 0) uniform sampler2D gbAlbedoMetallic;
+layout (set = 2, binding = 1) uniform sampler2D gbNormalRoughness;
+layout (set = 2, binding = 2) uniform sampler2D gbDepth;
 
 const float PI = 3.14159265359;
+
+// --- Cook-Torrance BRDF functions (same as forward PBR) ---
 
 // GGX / Trowbridge-Reitz normal distribution
 float distributionGGX(float NdotH, float roughness) {
@@ -57,40 +51,49 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+/// Reconstruct world-space position from depth buffer + inverse matrices.
+/// Avoids storing world position as a G-buffer render target (saves 16 bytes/pixel).
+vec3 reconstructWorldPos(vec2 uv, float depth) {
+    // UV [0,1] -> NDC [-1,1]
+    vec4 clipPos = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 viewPos = ubo.invProj * clipPos;
+    viewPos /= viewPos.w;
+    vec4 worldPos = ubo.invView * viewPos;
+    return worldPos.xyz;
+}
+
 void main() {
-    // --- Sample textures ---
-    vec4 albedoSample = texture(albedoMap, fragTexCoord) * pc.baseColorFactor;
-    if (albedoSample.a < 0.1)
-    discard;
+    // --- Sample G-buffer ---
+    vec4 albedoMetallic  = texture(gbAlbedoMetallic, inUV);
+    vec4 normalRoughness = texture(gbNormalRoughness, inUV);
+    float depth          = texture(gbDepth, inUV).r;
 
-    vec3 albedo = pow(albedoSample.rgb, vec3(2.2)); // sRGB → linear
+    // Sky/background pixels — no geometry wrote here
+    if (depth >= 1.0) {
+        outColor = vec4(0.02, 0.02, 0.02, 1.0);
+        return;
+    }
 
-    // glTF: R=occlusion, G=roughness, B=metallic
-    vec4 mrSample = texture(metallicRoughnessMap, fragTexCoord);
-    float roughness = clamp(mrSample.g, 0.04, 1.0);
-    float metallic = clamp(mrSample.b, 0.0, 1.0);
+    // --- Unpack G-buffer ---
+    vec3 albedo    = pow(albedoMetallic.rgb, vec3(2.2)); // sRGB -> linear
+    float metallic = albedoMetallic.a;
+    vec3 N         = normalize(normalRoughness.xyz);
+    float roughness = normalRoughness.a;
 
-    // --- Normal mapping ---
-    vec3 N = normalize(fragNormal);
-    if (!gl_FrontFacing) N = -N;
-
-    vec3 T = normalize(inTangent.xyz);
-    vec3 B = cross(N, T) * inTangent.w;
-    mat3 TBN = mat3(T, B, N);
-
-    vec3 localNormal = texture(normalMap, fragTexCoord).rgb * 2.0 - 1.0;
-    N = normalize(TBN * normalize(localNormal));
+    // --- Reconstruct world position from depth ---
+    vec3 worldPos = reconstructWorldPos(inUV, depth);
 
     // --- Lighting setup ---
-    vec3 V = normalize(ubo.cameraPos.xyz - fragPos);
+    vec3 V = normalize(ubo.cameraPos.xyz - worldPos);
     float NdotV = max(dot(N, V), 0.0001);
 
     // F0: base reflectivity (dielectric = 0.04, metal uses albedo)
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
+    // --- Evaluate all point lights ---
     vec3 Lo = vec3(0.0);
     for (int i = 0; i < 24; i++) {
-        vec3 Ldir = ubo.pointLights[i].position.xyz - fragPos;
+        vec3 Ldir = ubo.pointLights[i].position.xyz - worldPos;
         float dist = length(Ldir);
         vec3 L = normalize(Ldir);
         vec3 H = normalize(V + L);

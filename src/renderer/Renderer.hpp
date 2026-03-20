@@ -12,13 +12,13 @@
 
 #include <memory>
 
+#include "common/Config.hpp"
 
 struct Texture;
 class Mesh;
 class UserInterface;
 class GraphicsPipeline;
-// Forward declarations
-class RenderPass;
+class GBuffer;
 class SwapChain;
 class VulkanContext;
 
@@ -44,15 +44,19 @@ public:
                    const std::vector<MeshInstance> &meshInstances,
                    const std::vector<PointLight> &pointLights);
 
-    void recreateSwapChain() const;
+    void recreateSwapChain();
 
     [[nodiscard]] vk::DescriptorSetLayout getGlobalDescriptorSetLayout() const { return globalDescriptorSetLayout_; }
     [[nodiscard]] vk::DescriptorSetLayout getTextureDescriptorSetLayout() const { return textureLayout_; }
 
     [[nodiscard]] std::vector<vk::DescriptorSetLayout> getDescriptorSetLayouts() const {
-        // The order here MUST match your set = 0, set = 1 in GLSL
-        return {globalDescriptorSetLayout_, textureLayout_};
+        // The order here MUST match your set = 0, set = 1, set = 2 in GLSL
+        return {globalDescriptorSetLayout_, textureLayout_, gbufferLayout_};
     }
+
+    [[nodiscard]] GBuffer &getGBuffer() const { return *gbuffer_; }
+    [[nodiscard]] RenderPath getRenderPath() const { return renderPath_; }
+    void setRenderPath(RenderPath path) { renderPath_ = path; }
 
     vk::DescriptorSet createTextureDescriptorSet(
         vk::ImageView imageView,
@@ -77,11 +81,31 @@ private:
                              const UserInterface &userInterface,
                              const std::vector<MeshInstance> &meshInstances,
                              uint32_t instanceCount) const;
+    // Forward rendering
     void renderScene(vk::CommandBuffer cmd,
                      const GraphicsPipeline &graphicsPipeline,
                      uint32_t imageIndex,
                      const std::vector<MeshInstance> &meshInstances,
                      uint32_t instanceCount) const;
+
+    // Deferred rendering
+    void renderDeferred(vk::CommandBuffer cmd,
+                        const GraphicsPipeline &graphicsPipeline,
+                        uint32_t imageIndex,
+                        const std::vector<MeshInstance> &meshInstances,
+                        uint32_t instanceCount) const;
+    void geometryPass(vk::CommandBuffer cmd,
+                      const GraphicsPipeline &graphicsPipeline,
+                      const std::vector<MeshInstance> &meshInstances) const;
+    void gbufferBarrier(vk::CommandBuffer cmd) const;
+    void lightingPass(vk::CommandBuffer cmd,
+                      const GraphicsPipeline &graphicsPipeline,
+                      uint32_t imageIndex) const;
+    void forwardOverlayPass(vk::CommandBuffer cmd,
+                            const GraphicsPipeline &graphicsPipeline,
+                            uint32_t imageIndex,
+                            const std::vector<MeshInstance> &meshInstances,
+                            uint32_t instanceCount) const;
     [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryColorAttachment(uint32_t imageIndex) const;
     [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryDepthAttachment() const;
     void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
@@ -101,6 +125,8 @@ private:
                                                 const std::vector<MeshInstance> &meshInstances) const;
     void createDescriptorPool();
     void createDescriptorSets();
+    void createGBufferDescriptorSets();
+    void updateGBufferDescriptorSets();
 
     void transitionImageLayout(vk::CommandBuffer cmd,
                                vk::Image image,
@@ -142,6 +168,13 @@ private:
     std::vector<vk::DescriptorSet> descriptorSets_;
     vk::DescriptorSetLayout globalDescriptorSetLayout_;
     vk::DescriptorSetLayout textureLayout_;
+
+    // Deferred shading resources
+    RenderPath renderPath_ = RenderPath::Deferred;
+    std::unique_ptr<GBuffer> gbuffer_;
+    vk::DescriptorSetLayout gbufferLayout_;
+    std::vector<vk::DescriptorSet> gbufferDescriptorSets_; // one per frame-in-flight
+    vk::Sampler gbufferSampler_; // nearest-neighbor, clamp-to-edge
 
     Material defaultMaterial;
 };
