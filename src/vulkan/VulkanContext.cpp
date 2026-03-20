@@ -158,8 +158,6 @@ int VulkanContext::rateDeviceSuitability(vk::PhysicalDevice device) {
 }
 
 void VulkanContext::createLogicalDevice() {
-    // queueIndices_ = findQueueFamilies(physicalDevice_);
-
     std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
     std::set<uint32_t> uniqueQueueFamilies =
         {queueIndices_.graphicsFamily.value(), queueIndices_.presentFamily.value()};

@@ -98,10 +98,40 @@ void App::loadPointLights() {
     };
 
     const std::vector<LightDef> defs = {
-        {glm::vec3(4.0f, 3.5f, -3.0f), 8.0f, glm::vec3(1.0f, 0.45f, 0.1f), 6.0f}, // warm orange
-        {glm::vec3(10.0f, 3.5f, -3.0f), 8.0f, glm::vec3(1.0f, 0.45f, 0.1f), 6.0f}, // warm orange
-        {glm::vec3(6.0f, 1.0f, 2.0f), 6.0f, glm::vec3(0.4f, 0.6f, 1.0f), 8.0f}, // cool blue
-        {glm::vec3(8.5f, 1.0f, 2.0f), 6.0f, glm::vec3(0.4f, 0.6f, 1.0f), 8.0f}, // cool blue
+        // warm orange (upper, far)
+        {glm::vec3(4.0f, 3.5f, -3.0f),  8.0f, glm::vec3(1.0f, 0.45f, 0.1f), 6.0f},
+        {glm::vec3(10.0f, 3.5f, -3.0f), 8.0f, glm::vec3(1.0f, 0.45f, 0.1f), 6.0f},
+        // cool blue (lower, near)
+        {glm::vec3(6.0f, 1.0f, 2.0f),   6.0f, glm::vec3(0.4f, 0.6f, 1.0f),  8.0f},
+        {glm::vec3(8.5f, 1.0f, 2.0f),   6.0f, glm::vec3(0.4f, 0.6f, 1.0f),  8.0f},
+        // warm white (upper, mid)
+        {glm::vec3(2.0f, 4.0f, -1.0f),  7.0f, glm::vec3(1.0f, 0.95f, 0.8f), 6.0f},
+        {glm::vec3(7.0f, 4.0f, -1.0f),  7.0f, glm::vec3(1.0f, 0.95f, 0.8f), 6.0f},
+        {glm::vec3(12.0f, 4.0f, -1.0f), 7.0f, glm::vec3(1.0f, 0.95f, 0.8f), 6.0f},
+        // green accent (ground level)
+        {glm::vec3(3.5f, 0.5f, -2.0f),  5.0f, glm::vec3(0.3f, 1.0f, 0.4f),  5.0f},
+        {glm::vec3(10.5f, 0.5f, -2.0f), 5.0f, glm::vec3(0.3f, 1.0f, 0.4f),  5.0f},
+        // purple (high, flanks)
+        {glm::vec3(1.0f, 5.0f, -3.5f),  6.0f, glm::vec3(0.7f, 0.3f, 1.0f),  7.0f},
+        {glm::vec3(13.0f, 5.0f, -3.5f), 6.0f, glm::vec3(0.7f, 0.3f, 1.0f),  7.0f},
+        // red torch (low, corners)
+        {glm::vec3(2.0f, 1.5f, 1.5f),   5.0f, glm::vec3(1.0f, 0.2f, 0.1f),  4.0f},
+        {glm::vec3(12.0f, 1.5f, 1.5f),  5.0f, glm::vec3(1.0f, 0.2f, 0.1f),  4.0f},
+        // cyan fill (mid height)
+        {glm::vec3(5.0f, 2.5f, -5.0f),  6.0f, glm::vec3(0.2f, 0.9f, 0.9f),  7.0f},
+        {glm::vec3(9.0f, 2.5f, -5.0f),  6.0f, glm::vec3(0.2f, 0.9f, 0.9f),  7.0f},
+        // neutral white (center, high)
+        {glm::vec3(7.0f, 6.0f, -1.5f),  9.0f, glm::vec3(1.0f, 1.0f, 1.0f),  8.0f},
+        // right flank (X 12.4–15.5)
+        {glm::vec3(12.4f, 2.0f, -2.0f),  6.0f, glm::vec3(1.0f, 0.45f, 0.1f), 5.0f}, // warm orange
+        {glm::vec3(13.8f, 1.0f, 0.5f),   5.0f, glm::vec3(0.4f, 0.6f, 1.0f),  6.0f}, // cool blue
+        {glm::vec3(15.0f, 3.0f, -3.5f),  6.0f, glm::vec3(0.7f, 0.3f, 1.0f),  7.0f}, // purple
+        {glm::vec3(15.5f, 0.5f, -1.0f),  5.0f, glm::vec3(0.3f, 1.0f, 0.4f),  5.0f}, // green
+        // underground / below floor
+        {glm::vec3(4.0f, -0.5f, -1.5f),  5.0f, glm::vec3(0.9f, 0.7f, 0.3f),  5.0f}, // amber
+        {glm::vec3(10.0f, -0.8f, -1.5f), 5.0f, glm::vec3(0.9f, 0.7f, 0.3f),  5.0f}, // amber
+        {glm::vec3(6.5f, -1.6f, -0.5f),  4.0f, glm::vec3(0.5f, 0.7f, 1.0f),  6.0f}, // cool blue
+        {glm::vec3(7.5f, -2.3f, -2.5f),  4.0f, glm::vec3(0.5f, 0.7f, 1.0f),  6.0f}, // cool blue
     };
 
     auto sphereMesh = assetManager_->getSharedSphere();
