@@ -46,8 +46,7 @@ Step
 - Normal Mapping 
 - add 24 spheres object to indicate point light and using ssbo to reduce attribute count in shader
 - pbr without image based lighting
-- 
-- Depth reconstruction
+- Defer shading with: Depth reconstruction
 
 
 七、給你一個實戰任務（面試加分）

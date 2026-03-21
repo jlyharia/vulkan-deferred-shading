@@ -20,6 +20,10 @@
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/SwapChain.hpp"
 #include "vulkan/GBuffer.hpp"
+#include "renderer/passes/ForwardPass.hpp"
+#include "renderer/passes/GeometryPass.hpp"
+#include "renderer/passes/LightingPass.hpp"
+#include "renderer/passes/OverlayPass.hpp"
 
 
 // The C++ Bindings Header
@@ -126,6 +130,12 @@ void Renderer::initResources() {
     auto extent = swapChain_.getExtent();
     gbuffer_ = std::make_unique<GBuffer>(context_, extent.width, extent.height);
     createGBufferDescriptorSets();
+
+    // Render passes (GBuffer must exist before GeometryPass is constructed)
+    forwardPass_  = std::make_unique<ForwardPass>(swapChain_);
+    geometryPass_ = std::make_unique<GeometryPass>(swapChain_, *gbuffer_);
+    lightingPass_ = std::make_unique<LightingPass>(swapChain_);
+    overlayPass_  = std::make_unique<OverlayPass>(swapChain_);
 }
 
 
@@ -155,7 +165,9 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
         if (renderPath_ == RenderPath::Deferred) {
             renderDeferred(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
         } else {
-            renderScene(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
+            forwardPass_->execute(cmd, graphicsPipeline, imageIndex,
+                                  descriptorSets_[currentFrame], meshInstances, instanceCount,
+                                  defaultMaterial, sphereMesh_);
         }
 
         // UI pass (ImGui handles its own begin/endRendering)
@@ -164,113 +176,6 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
         finalizeFrameImages(cmd, imageIndex);
     }
     cmd.end();
-}
-
-void Renderer::renderScene(const vk::CommandBuffer cmd,
-                           const GraphicsPipeline &graphicsPipeline,
-                           const uint32_t imageIndex,
-                           const std::vector<MeshInstance> &meshInstances,
-                           const uint32_t instanceCount) const {
-
-    auto colorAttachment = getPrimaryColorAttachment(imageIndex);
-    auto depthAttachment = getPrimaryDepthAttachment();
-
-    vk::RenderingInfo renderingInfo{};
-    renderingInfo.setRenderArea({{0, 0}, swapChain_.getExtent()})
-                 .setLayerCount(1)
-                 .setColorAttachments(colorAttachment)
-                 .setPDepthAttachment(&depthAttachment);
-
-    const vk::PipelineLayout layout = graphicsPipeline.getPipelineLayout();
-
-    cmd.beginRendering(renderingInfo);
-    {
-        // Dynamic State
-        auto extent = swapChain_.getExtent();
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
-
-        // Bind Global Uniforms (Camera View/Proj) — done once, layout is shared
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               layout,
-                               DescriptorSets::GLOBAL_SET,
-                               {descriptorSets_[currentFrame]},
-                               {});
-
-        vk::Pipeline currentPipeline = nullptr;
-
-        // --- NON-INSTANCED PASS: everything except sphere instances ---
-        for (const auto &[mesh, transform, name, color] : meshInstances) {
-            if (!mesh)
-                continue;
-            if (sphereMesh_ && mesh == sphereMesh_)
-                continue; // drawn in the instanced pass below
-
-            vk::DeviceSize offsets[] = {0};
-            cmd.bindVertexBuffers(0, {mesh->getVertexBuffer()}, offsets);
-            cmd.bindIndexBuffer(mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-
-            const auto &materials = mesh->getMaterials();
-
-            for (const auto &submesh : mesh->getSubmeshes()) {
-                const auto &mat = (submesh.materialIndex >= 0)
-                                      ? materials[submesh.materialIndex]
-                                      : defaultMaterial;
-
-                // --- SELECT PIPELINE ---
-                const vk::Pipeline targetPipeline = mat.unlit
-                                                        ? graphicsPipeline.getUnlitPipeline()
-                                                        : graphicsPipeline.getPbrPipeline();
-                if (targetPipeline != currentPipeline) {
-                    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, targetPipeline);
-                    currentPipeline = targetPipeline;
-                }
-
-                // --- PUSH CONSTANTS (Matrix + per-instance color * material factor) ---
-                MeshPushConstants constants;
-                constants.modelMatrix     = transform.modelMatrix;
-                constants.baseColorFactor = color * mat.baseColorFactor;
-
-                cmd.pushConstants<MeshPushConstants>(
-                    layout,
-                    vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-                    0,
-                    constants);
-
-                // --- BIND MATERIAL TEXTURES (SET 1) ---
-                if (mat.textureSet) {
-                    cmd.bindDescriptorSets(
-                        vk::PipelineBindPoint::eGraphics,
-                        layout,
-                        DescriptorSets::MATERIAL_SET,
-                        {mat.textureSet},
-                        {});
-                }
-
-                cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
-            }
-        }
-
-        // --- INSTANCED PASS: all sphere instances in one draw call ---
-        if (sphereMesh_ && instanceCount > 0) {
-            vk::DeviceSize offset = 0;
-            cmd.bindVertexBuffers(0, {sphereMesh_->getVertexBuffer()}, {offset});
-            cmd.bindIndexBuffer(sphereMesh_->getIndexBuffer(), 0, vk::IndexType::eUint32);
-
-            const vk::Pipeline unlitPipeline = graphicsPipeline.getUnlitPipeline();
-            if (unlitPipeline != currentPipeline) {
-                cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, unlitPipeline);
-            }
-
-            for (const auto &submesh : sphereMesh_->getSubmeshes()) {
-                cmd.drawIndexed(submesh.indexCount, instanceCount, submesh.firstIndex, 0, 0);
-            }
-        }
-    }
-    cmd.endRendering();
 }
 
 // =============================================================================
@@ -282,289 +187,60 @@ void Renderer::renderDeferred(vk::CommandBuffer cmd,
                               uint32_t imageIndex,
                               const std::vector<MeshInstance> &meshInstances,
                               uint32_t instanceCount) const {
-    geometryPass(cmd, graphicsPipeline, meshInstances);
-    gbufferBarrier(cmd);
-    lightingPass(cmd, graphicsPipeline, imageIndex);
-    forwardOverlayPass(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
+    geometryPass_->execute(cmd, graphicsPipeline, descriptorSets_[currentFrame],
+                           meshInstances, defaultMaterial, sphereMesh_);
+    lightingPass_->execute(cmd, graphicsPipeline, imageIndex,
+                           descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame]);
+    overlayPass_->execute(cmd, graphicsPipeline, imageIndex,
+                          descriptorSets_[currentFrame], sphereMesh_, instanceCount);
 }
 
-/// Geometry pass: renders all PBR geometry into the G-buffer (2 MRT + depth).
-void Renderer::geometryPass(vk::CommandBuffer cmd,
-                            const GraphicsPipeline &graphicsPipeline,
-                            const std::vector<MeshInstance> &meshInstances) const {
-    auto extent = swapChain_.getExtent();
-    const vk::PipelineLayout layout = graphicsPipeline.getPipelineLayout();
-
-    // G-buffer color attachments
-    std::array<vk::RenderingAttachmentInfo, 2> colorAttachments;
-    colorAttachments[0] = vk::RenderingAttachmentInfo()
-        .setImageView(gbuffer_->getAlbedoMetallicView())
-        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}));
-    colorAttachments[1] = vk::RenderingAttachmentInfo()
-        .setImageView(gbuffer_->getNormalRoughnessView())
-        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}));
-
-    auto depthAttachment = getPrimaryDepthAttachment();
-
-    vk::RenderingInfo renderingInfo{};
-    renderingInfo.setRenderArea({{0, 0}, extent})
-                 .setLayerCount(1)
-                 .setColorAttachments(colorAttachments)
-                 .setPDepthAttachment(&depthAttachment);
-
-    cmd.beginRendering(renderingInfo);
-    {
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
-
-        // Bind global descriptor set (set 0)
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               layout, DescriptorSets::GLOBAL_SET,
-                               {descriptorSets_[currentFrame]}, {});
-
-        // Bind G-buffer pipeline
-        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline.getGBufferPipeline());
-
-        // Draw all PBR geometry (skip spheres — they go in the overlay pass)
-        for (const auto &[mesh, transform, name, color] : meshInstances) {
-            if (!mesh) continue;
-            if (sphereMesh_ && mesh == sphereMesh_) continue;
-
-            vk::DeviceSize offsets[] = {0};
-            cmd.bindVertexBuffers(0, {mesh->getVertexBuffer()}, offsets);
-            cmd.bindIndexBuffer(mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-
-            const auto &materials = mesh->getMaterials();
-
-            for (const auto &submesh : mesh->getSubmeshes()) {
-                const auto &mat = (submesh.materialIndex >= 0)
-                                      ? materials[submesh.materialIndex]
-                                      : defaultMaterial;
-
-                // Skip unlit materials — they go in the overlay pass
-                if (mat.unlit) continue;
-
-                MeshPushConstants constants;
-                constants.modelMatrix     = transform.modelMatrix;
-                constants.baseColorFactor = color * mat.baseColorFactor;
-
-                cmd.pushConstants<MeshPushConstants>(
-                    layout,
-                    vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-                    0, constants);
-
-                if (mat.textureSet) {
-                    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                           layout, DescriptorSets::MATERIAL_SET,
-                                           {mat.textureSet}, {});
-                }
-
-                cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
-            }
-        }
-    }
-    cmd.endRendering();
-}
-
-/// Pipeline barrier: transitions G-buffer color attachments and depth from
-/// attachment-write to shader-read for the lighting pass.
-void Renderer::gbufferBarrier(vk::CommandBuffer cmd) const {
+void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {
+    // Batch all frame-start layout transitions into a single pipelineBarrier2 call so the
+    // driver can merge them, rather than issuing 2–4 separate sync points.
     auto makeColorBarrier = [](vk::Image image) {
         return vk::ImageMemoryBarrier2()
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
             .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-            .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
-            .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
-            .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
-            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcAccessMask(vk::AccessFlagBits2::eNone)
+            .setDstStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+            .setDstAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
             .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
             .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
             .setImage(image)
             .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
     };
 
-    std::array<vk::ImageMemoryBarrier2, 3> barriers = {
-        // RT0: albedo + metallic
-        makeColorBarrier(gbuffer_->getAlbedoMetallicImage()),
-        // RT1: normal + roughness
-        makeColorBarrier(gbuffer_->getNormalRoughnessImage()),
-        // Depth: attachment -> read-only (allows simultaneous sampling + depth test)
-        vk::ImageMemoryBarrier2()
-            .setSrcStageMask(vk::PipelineStageFlagBits2::eLateFragmentTests)
-            .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
-            .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
-            .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-            .setNewLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(swapChain_.getDepthImage())
-            .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}),
-    };
+    const vk::ImageMemoryBarrier2 depthBarrier = vk::ImageMemoryBarrier2()
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
+        .setSrcStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                         vk::PipelineStageFlagBits2::eLateFragmentTests)
+        .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+        .setDstStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                         vk::PipelineStageFlagBits2::eLateFragmentTests)
+        .setDstAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentRead |
+                          vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(swapChain_.getDepthImage())
+        .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
 
-    vk::DependencyInfo depInfo;
-    depInfo.setImageMemoryBarriers(barriers);
-    cmd.pipelineBarrier2(depInfo);
-}
-
-/// Lighting pass: fullscreen triangle that samples the G-buffer and evaluates
-/// Cook-Torrance BRDF per pixel, writing the final lit result to the swapchain.
-void Renderer::lightingPass(vk::CommandBuffer cmd,
-                            const GraphicsPipeline &graphicsPipeline,
-                            uint32_t imageIndex) const {
-    auto extent = swapChain_.getExtent();
-    const vk::PipelineLayout layout = graphicsPipeline.getPipelineLayout();
-
-    // Write to swapchain image — eDontCare since fullscreen triangle overwrites every pixel
-    auto colorAttachment = vk::RenderingAttachmentInfo()
-        .setImageView(swapChain_.getImageViews()[imageIndex])
-        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eDontCare)
-        .setStoreOp(vk::AttachmentStoreOp::eStore);
-
-    vk::RenderingInfo renderingInfo{};
-    renderingInfo.setRenderArea({{0, 0}, extent})
-                 .setLayerCount(1)
-                 .setColorAttachments(colorAttachment);
-    // No depth attachment — lighting pass is screen-space only
-
-    cmd.beginRendering(renderingInfo);
-    {
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
-
-        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline.getLightingPipeline());
-
-        // Bind set 0 (GlobalUBO — camera, lights, inverse matrices)
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               layout, DescriptorSets::GLOBAL_SET,
-                               {descriptorSets_[currentFrame]}, {});
-
-        // Bind set 2 (G-buffer textures)
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               layout, DescriptorSets::GBUFFER_SET,
-                               {gbufferDescriptorSets_[currentFrame]}, {});
-
-        cmd.draw(3, 1, 0, 0); // fullscreen triangle — 3 vertices, no vertex buffer
-    }
-    cmd.endRendering();
-}
-
-/// Forward overlay: renders light sphere visualization on top of the lit result.
-/// Uses depth test (read-only) but no depth write to avoid corrupting the depth buffer.
-void Renderer::forwardOverlayPass(vk::CommandBuffer cmd,
-                                  const GraphicsPipeline &graphicsPipeline,
-                                  uint32_t imageIndex,
-                                  const std::vector<MeshInstance> &meshInstances,
-                                  uint32_t instanceCount) const {
-    if (!sphereMesh_ || instanceCount == 0) return;
-
-    auto extent = swapChain_.getExtent();
-    const vk::PipelineLayout layout = graphicsPipeline.getPipelineLayout();
-
-    // Load (not clear) the lit result from the lighting pass
-    auto colorAttachment = vk::RenderingAttachmentInfo()
-        .setImageView(swapChain_.getImageViews()[imageIndex])
-        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eLoad)
-        .setStoreOp(vk::AttachmentStoreOp::eStore);
-
-    // Depth in read-only layout — depth test ON, depth write OFF (via pipeline state)
-    auto depthAttachment = vk::RenderingAttachmentInfo()
-        .setImageView(swapChain_.getDepthImageView())
-        .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eLoad)
-        .setStoreOp(vk::AttachmentStoreOp::eNone);
-
-    vk::RenderingInfo renderingInfo{};
-    renderingInfo.setRenderArea({{0, 0}, extent})
-                 .setLayerCount(1)
-                 .setColorAttachments(colorAttachment)
-                 .setPDepthAttachment(&depthAttachment);
-
-    cmd.beginRendering(renderingInfo);
-    {
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
-
-        // Bind global descriptor set (set 0)
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               layout, DescriptorSets::GLOBAL_SET,
-                               {descriptorSets_[currentFrame]}, {});
-
-        // Overlay unlit pipeline: depth test ON, depth write OFF
-        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline.getOverlayUnlitPipeline());
-
-        vk::DeviceSize offset = 0;
-        cmd.bindVertexBuffers(0, {sphereMesh_->getVertexBuffer()}, {offset});
-        cmd.bindIndexBuffer(sphereMesh_->getIndexBuffer(), 0, vk::IndexType::eUint32);
-
-        for (const auto &submesh : sphereMesh_->getSubmeshes()) {
-            cmd.drawIndexed(submesh.indexCount, instanceCount, submesh.firstIndex, 0, 0);
-        }
-    }
-    cmd.endRendering();
-}
-
-vk::RenderingAttachmentInfo Renderer::getPrimaryColorAttachment(uint32_t imageIndex) const {
-    vk::RenderingAttachmentInfo colorAttachment;
-    colorAttachment.setImageView(swapChain_.getImageViews()[imageIndex])
-                   .setImageLayout(vk::ImageLayout::eAttachmentOptimal)
-                   .setLoadOp(vk::AttachmentLoadOp::eClear)
-                   .setStoreOp(vk::AttachmentStoreOp::eStore)
-                   .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.02f, 0.02f, 0.02f, 1.0f}));
-    return colorAttachment;
-}
-
-vk::RenderingAttachmentInfo Renderer::getPrimaryDepthAttachment() const {
-    vk::RenderingAttachmentInfo depthAttachment;
-    depthAttachment.setImageView(swapChain_.getDepthImageView())
-                   .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-                   .setLoadOp(vk::AttachmentLoadOp::eClear)
-                   // .setStoreOp(vk::AttachmentStoreOp::eDontCare)
-                   .setStoreOp(vk::AttachmentStoreOp::eStore)
-                   .setClearValue(vk::ClearDepthStencilValue(1.0f, 0));
-    return depthAttachment;
-}
-
-void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {
-    // Transition Swapchain: Undefined -> ColorAttachment
-    transitionImageLayout(cmd, swapChain_.getImages()[imageIndex],
-                          vk::ImageLayout::eUndefined,
-                          vk::ImageLayout::eColorAttachmentOptimal,
-                          vk::ImageAspectFlagBits::eColor);
-
-    // Transition Depth: Undefined -> DepthAttachment
-    transitionImageLayout(cmd, swapChain_.getDepthImage(),
-                          vk::ImageLayout::eUndefined,
-                          vk::ImageLayout::eDepthStencilAttachmentOptimal,
-                          vk::ImageAspectFlagBits::eDepth);
-
-    // Deferred: transition G-buffer color attachments
     if (renderPath_ == RenderPath::Deferred) {
-        transitionImageLayout(cmd, gbuffer_->getAlbedoMetallicImage(),
-                              vk::ImageLayout::eUndefined,
-                              vk::ImageLayout::eColorAttachmentOptimal,
-                              vk::ImageAspectFlagBits::eColor);
-        transitionImageLayout(cmd, gbuffer_->getNormalRoughnessImage(),
-                              vk::ImageLayout::eUndefined,
-                              vk::ImageLayout::eColorAttachmentOptimal,
-                              vk::ImageAspectFlagBits::eColor);
+        std::array<vk::ImageMemoryBarrier2, 4> barriers = {
+            makeColorBarrier(swapChain_.getImages()[imageIndex]),
+            depthBarrier,
+            makeColorBarrier(gbuffer_->getAlbedoMetallicImage()),
+            makeColorBarrier(gbuffer_->getNormalRoughnessImage()),
+        };
+        cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
+    } else {
+        std::array<vk::ImageMemoryBarrier2, 2> barriers = {
+            makeColorBarrier(swapChain_.getImages()[imageIndex]),
+            depthBarrier,
+        };
+        cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
     }
 }
 

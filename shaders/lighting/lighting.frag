@@ -64,9 +64,9 @@ vec3 reconstructWorldPos(vec2 uv, float depth) {
 
 void main() {
     // --- Sample G-buffer ---
-    vec4 albedoMetallic  = texture(gbAlbedoMetallic, inUV);
+    vec4 albedoMetallic = texture(gbAlbedoMetallic, inUV);
     vec4 normalRoughness = texture(gbNormalRoughness, inUV);
-    float depth          = texture(gbDepth, inUV).r;
+    float depth = texture(gbDepth, inUV).r;
 
     // Sky/background pixels — no geometry wrote here
     if (depth >= 1.0) {
@@ -75,9 +75,9 @@ void main() {
     }
 
     // --- Unpack G-buffer ---
-    vec3 albedo    = pow(albedoMetallic.rgb, vec3(2.2)); // sRGB -> linear
+    vec3 albedo = albedoMetallic.rgb;
     float metallic = albedoMetallic.a;
-    vec3 N         = normalize(normalRoughness.xyz);
+    vec3 N = normalize(normalRoughness.xyz);
     float roughness = normalRoughness.a;
 
     // --- Reconstruct world position from depth ---
@@ -95,12 +95,19 @@ void main() {
     for (int i = 0; i < 24; i++) {
         vec3 Ldir = ubo.pointLights[i].position.xyz - worldPos;
         float dist = length(Ldir);
+        float radius = ubo.pointLights[i].color.w;
+
+        // Early-out: fragment is outside light radius — skip full BRDF evaluation
+        if (dist >= radius) continue;
+
         vec3 L = normalize(Ldir);
         vec3 H = normalize(V + L);
         float intensity = ubo.pointLights[i].position.w;
         vec3 lightColor = ubo.pointLights[i].color.xyz;
 
-        float attenuation = intensity / (dist * dist);
+        // KHR_lights_punctual windowed attenuation — smoothly reaches 0 at radius, no pop
+        float window = pow(max(1.0 - pow(dist / radius, 4.0), 0.0), 2.0);
+        float attenuation = (intensity / (dist * dist + 1.0)) * window;
         vec3 radiance = lightColor * attenuation;
 
         float NdotL = max(dot(N, L), 0.0);
@@ -120,7 +127,7 @@ void main() {
     }
 
     // Ambient (simple approximation)
-    vec3 ambient = vec3(0.03) * albedo;
+    vec3 ambient = vec3(0.01) * albedo;
 
     vec3 color = ambient + Lo;
 

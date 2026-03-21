@@ -28,4 +28,4 @@ constexpr uint32_t GBUFFER_SET = 2;  // Set 2: G-buffer textures (deferred light
 }
 
 /// Runtime toggle between forward and deferred rendering paths.
-enum class RenderPath { Forward, Deferred };
+enum class RenderPath { Forward, Deferred, ForwardPlus };
