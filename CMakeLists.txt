@@ -73,13 +73,21 @@ add_executable(${TARGET_NAME}
         # Now these variables are guaranteed to be populated
         "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_glfw.cpp"
         "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_vulkan.cpp"
-        src/system/GltfLoader.cpp
-        src/system/GltfLoader.hpp
+        src/assets/GltfLoader.cpp
+        src/assets/GltfLoader.hpp
         src/scene/Mesh.cpp
         src/scene/Mesh.hpp
         src/vulkan/VulkanUtils.hpp
-        src/core/AssetManager.cpp
-        src/core/AssetManager.hpp
+        src/assets/AssetManager.cpp
+        src/assets/AssetManager.hpp
+        src/renderer/passes/ForwardPass.cpp
+        src/renderer/passes/ForwardPass.hpp
+        src/renderer/passes/GeometryPass.cpp
+        src/renderer/passes/GeometryPass.hpp
+        src/renderer/passes/LightingPass.cpp
+        src/renderer/passes/LightingPass.hpp
+        src/renderer/passes/OverlayPass.cpp
+        src/renderer/passes/OverlayPass.hpp
         src/scene/MeshInstance.hpp
         src/scene/Transform.hpp
         src/scene/Texture.hpp

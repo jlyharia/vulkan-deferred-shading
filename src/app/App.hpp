@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "../scene/Camera.hpp"
-#include "core/AssetManager.hpp"
+#include "assets/AssetManager.hpp"
 #include "scene/MeshInstance.hpp"
 #include "scene/TextureManager.hpp"
 #include "scene/PointLight.hpp"

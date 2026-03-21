@@ -21,6 +21,10 @@ class GraphicsPipeline;
 class GBuffer;
 class SwapChain;
 class VulkanContext;
+struct ForwardPass;
+struct GeometryPass;
+struct LightingPass;
+struct OverlayPass;
 
 
 class Renderer {
@@ -81,33 +85,12 @@ private:
                              const UserInterface &userInterface,
                              const std::vector<MeshInstance> &meshInstances,
                              uint32_t instanceCount) const;
-    // Forward rendering
-    void renderScene(vk::CommandBuffer cmd,
-                     const GraphicsPipeline &graphicsPipeline,
-                     uint32_t imageIndex,
-                     const std::vector<MeshInstance> &meshInstances,
-                     uint32_t instanceCount) const;
-
-    // Deferred rendering
+    // Deferred rendering orchestration
     void renderDeferred(vk::CommandBuffer cmd,
                         const GraphicsPipeline &graphicsPipeline,
                         uint32_t imageIndex,
                         const std::vector<MeshInstance> &meshInstances,
                         uint32_t instanceCount) const;
-    void geometryPass(vk::CommandBuffer cmd,
-                      const GraphicsPipeline &graphicsPipeline,
-                      const std::vector<MeshInstance> &meshInstances) const;
-    void gbufferBarrier(vk::CommandBuffer cmd) const;
-    void lightingPass(vk::CommandBuffer cmd,
-                      const GraphicsPipeline &graphicsPipeline,
-                      uint32_t imageIndex) const;
-    void forwardOverlayPass(vk::CommandBuffer cmd,
-                            const GraphicsPipeline &graphicsPipeline,
-                            uint32_t imageIndex,
-                            const std::vector<MeshInstance> &meshInstances,
-                            uint32_t instanceCount) const;
-    [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryColorAttachment(uint32_t imageIndex) const;
-    [[nodiscard]] vk::RenderingAttachmentInfo getPrimaryDepthAttachment() const;
     void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
     void finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
 
@@ -175,6 +158,12 @@ private:
     vk::DescriptorSetLayout gbufferLayout_;
     std::vector<vk::DescriptorSet> gbufferDescriptorSets_; // one per frame-in-flight
     vk::Sampler gbufferSampler_; // nearest-neighbor, clamp-to-edge
+
+    // Render passes (initialized in initResources, after GBuffer is ready)
+    std::unique_ptr<ForwardPass> forwardPass_;
+    std::unique_ptr<GeometryPass> geometryPass_;
+    std::unique_ptr<LightingPass> lightingPass_;
+    std::unique_ptr<OverlayPass> overlayPass_;
 
     Material defaultMaterial;
 };

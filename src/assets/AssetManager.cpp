@@ -5,7 +5,7 @@
 #include "AssetManager.hpp"
 #include "scene/Mesh.hpp"
 #include "scene/MeshUtils.hpp"
-#include "system/GltfLoader.hpp"
+#include "assets/GltfLoader.hpp"
 #include "vulkan/VulkanUtils.hpp"
 #include <iostream>
 
