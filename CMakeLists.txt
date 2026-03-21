@@ -92,6 +92,8 @@ add_executable(${TARGET_NAME}
         src/scene/PointLight.hpp
         src/scene/MeshUtils.cpp
         src/scene/MeshUtils.hpp
+        src/vulkan/GBuffer.hpp
+        src/vulkan/GBuffer.cpp
 )
 
 # ------------------------------------------------------------

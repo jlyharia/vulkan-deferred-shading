@@ -19,6 +19,7 @@
 #include "common/PushConstantConstant.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/SwapChain.hpp"
+#include "vulkan/GBuffer.hpp"
 
 
 // The C++ Bindings Header
@@ -59,15 +60,23 @@ Renderer::~Renderer() {
     std::cerr << "[Destructor] Renderer starting..." << std::endl;
     vkDeviceWaitIdle(context_.getDevice());
 
+    // Destroy G-buffer resources before pool (sets are freed when pool is destroyed)
+    gbuffer_.reset();
+    if (gbufferSampler_) {
+        context_.getDevice().destroySampler(gbufferSampler_);
+        gbufferSampler_ = nullptr;
+    }
+    if (gbufferLayout_) {
+        vkDestroyDescriptorSetLayout(context_.getDevice(), gbufferLayout_, nullptr);
+        gbufferLayout_ = nullptr;
+    }
+
     vkDestroyDescriptorPool(context_.getDevice(), descriptorPool_, nullptr);
-    std::cerr << "[Destructor] Renderer-descriptorPool_..." << std::endl;
 
     vkDestroyDescriptorSetLayout(context_.getDevice(), globalDescriptorSetLayout_, nullptr);
-    std::cerr << "[Destructor] Renderer-descriptorSetLayout_..." << std::endl;
 
     if (textureLayout_) {
         vkDestroyDescriptorSetLayout(context_.getDevice(), textureLayout_, nullptr);
-        std::cerr << "[Destructor] Renderer-textureLayout_..." << std::endl;
     }
 
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
@@ -112,6 +121,11 @@ void Renderer::initResources() {
     createInstanceBuffers();
     createDescriptorPool();
     createDescriptorSets();
+
+    // G-buffer: sized to match swapchain extent
+    auto extent = swapChain_.getExtent();
+    gbuffer_ = std::make_unique<GBuffer>(context_, extent.width, extent.height);
+    createGBufferDescriptorSets();
 }
 
 
@@ -133,21 +147,20 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
                                    const UserInterface &userInterface,
                                    const std::vector<MeshInstance> &meshInstances,
                                    const uint32_t instanceCount) const {
-    // 1. Setup
     auto beginInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     cmd.begin(beginInfo);
     {
-        // 2. Prepare Images (Transitions)
         prepareFrameImages(cmd, imageIndex);
 
-        // 3. Main Geometry Pass
-        renderScene(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
+        if (renderPath_ == RenderPath::Deferred) {
+            renderDeferred(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
+        } else {
+            renderScene(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
+        }
 
-        // 4. UI Pass (ImGui)
-        // Note: UserInterface handles its own begin/endRendering internally
+        // UI pass (ImGui handles its own begin/endRendering)
         userInterface.recordCommands(cmd, imageIndex);
 
-        // 5. Present Preparation
         finalizeFrameImages(cmd, imageIndex);
     }
     cmd.end();
@@ -260,6 +273,254 @@ void Renderer::renderScene(const vk::CommandBuffer cmd,
     cmd.endRendering();
 }
 
+// =============================================================================
+// Deferred Rendering
+// =============================================================================
+
+void Renderer::renderDeferred(vk::CommandBuffer cmd,
+                              const GraphicsPipeline &graphicsPipeline,
+                              uint32_t imageIndex,
+                              const std::vector<MeshInstance> &meshInstances,
+                              uint32_t instanceCount) const {
+    geometryPass(cmd, graphicsPipeline, meshInstances);
+    gbufferBarrier(cmd);
+    lightingPass(cmd, graphicsPipeline, imageIndex);
+    forwardOverlayPass(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
+}
+
+/// Geometry pass: renders all PBR geometry into the G-buffer (2 MRT + depth).
+void Renderer::geometryPass(vk::CommandBuffer cmd,
+                            const GraphicsPipeline &graphicsPipeline,
+                            const std::vector<MeshInstance> &meshInstances) const {
+    auto extent = swapChain_.getExtent();
+    const vk::PipelineLayout layout = graphicsPipeline.getPipelineLayout();
+
+    // G-buffer color attachments
+    std::array<vk::RenderingAttachmentInfo, 2> colorAttachments;
+    colorAttachments[0] = vk::RenderingAttachmentInfo()
+        .setImageView(gbuffer_->getAlbedoMetallicView())
+        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+        .setLoadOp(vk::AttachmentLoadOp::eClear)
+        .setStoreOp(vk::AttachmentStoreOp::eStore)
+        .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}));
+    colorAttachments[1] = vk::RenderingAttachmentInfo()
+        .setImageView(gbuffer_->getNormalRoughnessView())
+        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+        .setLoadOp(vk::AttachmentLoadOp::eClear)
+        .setStoreOp(vk::AttachmentStoreOp::eStore)
+        .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}));
+
+    auto depthAttachment = getPrimaryDepthAttachment();
+
+    vk::RenderingInfo renderingInfo{};
+    renderingInfo.setRenderArea({{0, 0}, extent})
+                 .setLayerCount(1)
+                 .setColorAttachments(colorAttachments)
+                 .setPDepthAttachment(&depthAttachment);
+
+    cmd.beginRendering(renderingInfo);
+    {
+        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
+                                        static_cast<float>(extent.width),
+                                        static_cast<float>(extent.height),
+                                        0.0f, 1.0f));
+        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+
+        // Bind global descriptor set (set 0)
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                               layout, DescriptorSets::GLOBAL_SET,
+                               {descriptorSets_[currentFrame]}, {});
+
+        // Bind G-buffer pipeline
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline.getGBufferPipeline());
+
+        // Draw all PBR geometry (skip spheres — they go in the overlay pass)
+        for (const auto &[mesh, transform, name, color] : meshInstances) {
+            if (!mesh) continue;
+            if (sphereMesh_ && mesh == sphereMesh_) continue;
+
+            vk::DeviceSize offsets[] = {0};
+            cmd.bindVertexBuffers(0, {mesh->getVertexBuffer()}, offsets);
+            cmd.bindIndexBuffer(mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+            const auto &materials = mesh->getMaterials();
+
+            for (const auto &submesh : mesh->getSubmeshes()) {
+                const auto &mat = (submesh.materialIndex >= 0)
+                                      ? materials[submesh.materialIndex]
+                                      : defaultMaterial;
+
+                // Skip unlit materials — they go in the overlay pass
+                if (mat.unlit) continue;
+
+                MeshPushConstants constants;
+                constants.modelMatrix     = transform.modelMatrix;
+                constants.baseColorFactor = color * mat.baseColorFactor;
+
+                cmd.pushConstants<MeshPushConstants>(
+                    layout,
+                    vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+                    0, constants);
+
+                if (mat.textureSet) {
+                    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                           layout, DescriptorSets::MATERIAL_SET,
+                                           {mat.textureSet}, {});
+                }
+
+                cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
+            }
+        }
+    }
+    cmd.endRendering();
+}
+
+/// Pipeline barrier: transitions G-buffer color attachments and depth from
+/// attachment-write to shader-read for the lighting pass.
+void Renderer::gbufferBarrier(vk::CommandBuffer cmd) const {
+    auto makeColorBarrier = [](vk::Image image) {
+        return vk::ImageMemoryBarrier2()
+            .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+            .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
+            .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
+            .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(image)
+            .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    };
+
+    std::array<vk::ImageMemoryBarrier2, 3> barriers = {
+        // RT0: albedo + metallic
+        makeColorBarrier(gbuffer_->getAlbedoMetallicImage()),
+        // RT1: normal + roughness
+        makeColorBarrier(gbuffer_->getNormalRoughnessImage()),
+        // Depth: attachment -> read-only (allows simultaneous sampling + depth test)
+        vk::ImageMemoryBarrier2()
+            .setSrcStageMask(vk::PipelineStageFlagBits2::eLateFragmentTests)
+            .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+            .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
+            .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
+            .setNewLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(swapChain_.getDepthImage())
+            .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}),
+    };
+
+    vk::DependencyInfo depInfo;
+    depInfo.setImageMemoryBarriers(barriers);
+    cmd.pipelineBarrier2(depInfo);
+}
+
+/// Lighting pass: fullscreen triangle that samples the G-buffer and evaluates
+/// Cook-Torrance BRDF per pixel, writing the final lit result to the swapchain.
+void Renderer::lightingPass(vk::CommandBuffer cmd,
+                            const GraphicsPipeline &graphicsPipeline,
+                            uint32_t imageIndex) const {
+    auto extent = swapChain_.getExtent();
+    const vk::PipelineLayout layout = graphicsPipeline.getPipelineLayout();
+
+    // Write to swapchain image — eDontCare since fullscreen triangle overwrites every pixel
+    auto colorAttachment = vk::RenderingAttachmentInfo()
+        .setImageView(swapChain_.getImageViews()[imageIndex])
+        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+        .setLoadOp(vk::AttachmentLoadOp::eDontCare)
+        .setStoreOp(vk::AttachmentStoreOp::eStore);
+
+    vk::RenderingInfo renderingInfo{};
+    renderingInfo.setRenderArea({{0, 0}, extent})
+                 .setLayerCount(1)
+                 .setColorAttachments(colorAttachment);
+    // No depth attachment — lighting pass is screen-space only
+
+    cmd.beginRendering(renderingInfo);
+    {
+        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
+                                        static_cast<float>(extent.width),
+                                        static_cast<float>(extent.height),
+                                        0.0f, 1.0f));
+        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline.getLightingPipeline());
+
+        // Bind set 0 (GlobalUBO — camera, lights, inverse matrices)
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                               layout, DescriptorSets::GLOBAL_SET,
+                               {descriptorSets_[currentFrame]}, {});
+
+        // Bind set 2 (G-buffer textures)
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                               layout, DescriptorSets::GBUFFER_SET,
+                               {gbufferDescriptorSets_[currentFrame]}, {});
+
+        cmd.draw(3, 1, 0, 0); // fullscreen triangle — 3 vertices, no vertex buffer
+    }
+    cmd.endRendering();
+}
+
+/// Forward overlay: renders light sphere visualization on top of the lit result.
+/// Uses depth test (read-only) but no depth write to avoid corrupting the depth buffer.
+void Renderer::forwardOverlayPass(vk::CommandBuffer cmd,
+                                  const GraphicsPipeline &graphicsPipeline,
+                                  uint32_t imageIndex,
+                                  const std::vector<MeshInstance> &meshInstances,
+                                  uint32_t instanceCount) const {
+    if (!sphereMesh_ || instanceCount == 0) return;
+
+    auto extent = swapChain_.getExtent();
+    const vk::PipelineLayout layout = graphicsPipeline.getPipelineLayout();
+
+    // Load (not clear) the lit result from the lighting pass
+    auto colorAttachment = vk::RenderingAttachmentInfo()
+        .setImageView(swapChain_.getImageViews()[imageIndex])
+        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+        .setLoadOp(vk::AttachmentLoadOp::eLoad)
+        .setStoreOp(vk::AttachmentStoreOp::eStore);
+
+    // Depth in read-only layout — depth test ON, depth write OFF (via pipeline state)
+    auto depthAttachment = vk::RenderingAttachmentInfo()
+        .setImageView(swapChain_.getDepthImageView())
+        .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
+        .setLoadOp(vk::AttachmentLoadOp::eLoad)
+        .setStoreOp(vk::AttachmentStoreOp::eNone);
+
+    vk::RenderingInfo renderingInfo{};
+    renderingInfo.setRenderArea({{0, 0}, extent})
+                 .setLayerCount(1)
+                 .setColorAttachments(colorAttachment)
+                 .setPDepthAttachment(&depthAttachment);
+
+    cmd.beginRendering(renderingInfo);
+    {
+        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
+                                        static_cast<float>(extent.width),
+                                        static_cast<float>(extent.height),
+                                        0.0f, 1.0f));
+        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+
+        // Bind global descriptor set (set 0)
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                               layout, DescriptorSets::GLOBAL_SET,
+                               {descriptorSets_[currentFrame]}, {});
+
+        // Overlay unlit pipeline: depth test ON, depth write OFF
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline.getOverlayUnlitPipeline());
+
+        vk::DeviceSize offset = 0;
+        cmd.bindVertexBuffers(0, {sphereMesh_->getVertexBuffer()}, {offset});
+        cmd.bindIndexBuffer(sphereMesh_->getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+        for (const auto &submesh : sphereMesh_->getSubmeshes()) {
+            cmd.drawIndexed(submesh.indexCount, instanceCount, submesh.firstIndex, 0, 0);
+        }
+    }
+    cmd.endRendering();
+}
+
 vk::RenderingAttachmentInfo Renderer::getPrimaryColorAttachment(uint32_t imageIndex) const {
     vk::RenderingAttachmentInfo colorAttachment;
     colorAttachment.setImageView(swapChain_.getImageViews()[imageIndex])
@@ -293,6 +554,18 @@ void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) co
                           vk::ImageLayout::eUndefined,
                           vk::ImageLayout::eDepthStencilAttachmentOptimal,
                           vk::ImageAspectFlagBits::eDepth);
+
+    // Deferred: transition G-buffer color attachments
+    if (renderPath_ == RenderPath::Deferred) {
+        transitionImageLayout(cmd, gbuffer_->getAlbedoMetallicImage(),
+                              vk::ImageLayout::eUndefined,
+                              vk::ImageLayout::eColorAttachmentOptimal,
+                              vk::ImageAspectFlagBits::eColor);
+        transitionImageLayout(cmd, gbuffer_->getNormalRoughnessImage(),
+                              vk::ImageLayout::eUndefined,
+                              vk::ImageLayout::eColorAttachmentOptimal,
+                              vk::ImageAspectFlagBits::eColor);
+    }
 }
 
 void Renderer::finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {
@@ -407,7 +680,7 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
     currentFrame = (currentFrame + 1) % engineConfig::MAX_FRAMES_IN_FLIGHT;
 }
 
-void Renderer::recreateSwapChain() const {
+void Renderer::recreateSwapChain() {
     // 1. Handle Minimization (Pause the engine if width/height is 0)
     int width = 0, height = 0;
     glfwGetFramebufferSize(window_, &width, &height);
@@ -421,6 +694,13 @@ void Renderer::recreateSwapChain() const {
 
     // 3. Recreate SwapChain (updates images, views, and depth resources)
     swapChain_.recreate();
+
+    // 4. Recreate G-buffer at the new resolution and re-point descriptor sets
+    if (gbuffer_) {
+        auto extent = swapChain_.getExtent();
+        gbuffer_->recreate(extent.width, extent.height);
+        updateGBufferDescriptorSets();
+    }
 
     // Note: Since we use Dynamic State for Viewport/Scissor,
     // we do NOT need to recreate the Pipeline!
@@ -541,6 +821,8 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera,
     GlobalUBO ubo{};
     ubo.view      = camera.getViewMatrix();
     ubo.proj      = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
+    ubo.invView   = glm::inverse(ubo.view);
+    ubo.invProj   = glm::inverse(ubo.proj);
     ubo.cameraPos = glm::vec4(camera.position, 0.0f);
 
     const size_t count = std::min(pointLights.size(), size_t{24});
@@ -561,11 +843,11 @@ void Renderer::createDescriptorPool() {
                                   .setType(vk::DescriptorType::eStorageBuffer)
                                   .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
 
-    // Pool Size 3: For the Texture Samplers (Set 1)
-    // Sponza has ~80 materials; let's reserve 200
+    // Pool Size 3: For the Texture Samplers (Set 1) + G-buffer samplers (Set 2)
+    // Sponza has ~80 materials; G-buffer adds 3 per frame-in-flight
     constexpr auto samplerPoolSize = vk::DescriptorPoolSize()
                                      .setType(vk::DescriptorType::eCombinedImageSampler)
-                                     .setDescriptorCount(200);
+                                     .setDescriptorCount(200 + 3 * engineConfig::MAX_FRAMES_IN_FLIGHT);
 
     std::array<vk::DescriptorPoolSize, 3> poolSizes = {uboPoolSize, ssboPoolSize, samplerPoolSize};
     auto poolInfo = vk::DescriptorPoolCreateInfo()
@@ -609,6 +891,59 @@ void Renderer::createDescriptorSets() {
                 .setDescriptorType(vk::DescriptorType::eStorageBuffer)
                 .setDescriptorCount(1)
                 .setPBufferInfo(&ssboInfo),
+        };
+
+        context_.getDevice().updateDescriptorSets(writes, nullptr);
+    }
+}
+
+void Renderer::createGBufferDescriptorSets() {
+    // Allocate one G-buffer descriptor set per frame-in-flight
+    std::vector<vk::DescriptorSetLayout> layouts(engineConfig::MAX_FRAMES_IN_FLIGHT, gbufferLayout_);
+    auto allocInfo = vk::DescriptorSetAllocateInfo()
+                     .setDescriptorPool(descriptorPool_)
+                     .setSetLayouts(layouts);
+    gbufferDescriptorSets_ = context_.getDevice().allocateDescriptorSets(allocInfo);
+
+    updateGBufferDescriptorSets();
+}
+
+void Renderer::updateGBufferDescriptorSets() {
+    for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
+        auto albedoInfo = vk::DescriptorImageInfo()
+            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setImageView(gbuffer_->getAlbedoMetallicView())
+            .setSampler(gbufferSampler_);
+
+        auto normalInfo = vk::DescriptorImageInfo()
+            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setImageView(gbuffer_->getNormalRoughnessView())
+            .setSampler(gbufferSampler_);
+
+        auto depthInfo = vk::DescriptorImageInfo()
+            .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
+            .setImageView(swapChain_.getDepthImageView())
+            .setSampler(gbufferSampler_);
+
+        std::array<vk::WriteDescriptorSet, 3> writes = {
+            vk::WriteDescriptorSet()
+                .setDstSet(gbufferDescriptorSets_[i])
+                .setDstBinding(0)
+                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                .setDescriptorCount(1)
+                .setPImageInfo(&albedoInfo),
+            vk::WriteDescriptorSet()
+                .setDstSet(gbufferDescriptorSets_[i])
+                .setDstBinding(1)
+                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                .setDescriptorCount(1)
+                .setPImageInfo(&normalInfo),
+            vk::WriteDescriptorSet()
+                .setDstSet(gbufferDescriptorSets_[i])
+                .setDstBinding(2)
+                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                .setDescriptorCount(1)
+                .setPImageInfo(&depthInfo),
         };
 
         context_.getDevice().updateDescriptorSets(writes, nullptr);
@@ -714,6 +1049,35 @@ void Renderer::createDescriptorSetLayout() {
 
         vk::DescriptorSetLayoutCreateInfo materialInfo({}, pbrBindings);
         textureLayout_ = device.createDescriptorSetLayout(materialInfo);
+    }
+
+    // --- [SET 2]: G-BUFFER INPUTS (deferred lighting pass) ---
+    {
+        std::array<vk::DescriptorSetLayoutBinding, 3> gbufferBindings = {
+            // Binding 0: Albedo + Metallic
+            vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+            // Binding 1: Normal + Roughness
+            vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+            // Binding 2: Depth (for world-position reconstruction)
+            vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+        };
+
+        vk::DescriptorSetLayoutCreateInfo gbufferInfo({}, gbufferBindings);
+        gbufferLayout_ = device.createDescriptorSetLayout(gbufferInfo);
+    }
+
+    // --- G-buffer nearest sampler (no filtering — texels map 1:1 to pixels) ---
+    {
+        auto samplerInfo = vk::SamplerCreateInfo()
+            .setMagFilter(vk::Filter::eNearest)
+            .setMinFilter(vk::Filter::eNearest)
+            .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+            .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+            .setAddressModeW(vk::SamplerAddressMode::eClampToEdge);
+        gbufferSampler_ = device.createSampler(samplerInfo);
     }
 }
 

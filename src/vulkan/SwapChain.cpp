@@ -161,7 +161,8 @@ void SwapChain::createDepthResources() {
                          swapChainExtent_.height,
                          depthFormat,
                          vk::ImageTiling::eOptimal,
-                         vk::ImageUsageFlagBits::eDepthStencilAttachment,
+                         vk::ImageUsageFlagBits::eDepthStencilAttachment |
+                         vk::ImageUsageFlagBits::eSampled, // deferred lighting pass samples depth for position reconstruction
                          VMA_MEMORY_USAGE_GPU_ONLY,
                          // vk::MemoryPropertyFlagBits::eDeviceLocal,
                          depthImage_,

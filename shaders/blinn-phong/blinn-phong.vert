@@ -1,10 +1,18 @@
 #version 450
 
 // 1. Global UBO: Only contains data that stays the same for the WHOLE frame
+struct PointLight {
+    vec4 position;
+    vec4 color;
+};
+
 layout (set = 0, binding = 0) uniform GlobalUBO {
     mat4 view;
     mat4 proj;
+    mat4 invView;
+    mat4 invProj;
     vec4 cameraPos;
+    PointLight pointLights[24];
 } ubo;
 
 // 2. Push Constant: Data that changes per DRAW CALL

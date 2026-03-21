@@ -36,6 +36,7 @@ Step
 2. Move vulkan resource destroy into queue.
    PBR Shader	Hard	Adds realistic metal, roughness, and light math.
    Shadow Maps	Very Hard	Adds actual shadows cast by the arches onto the floor.
+3. horizontal grid plan
 # What I have done
 - Vulkan 1.3
 - Dynamic Rendering 
@@ -43,18 +44,10 @@ Step
 - Gltf 
 - Mipmapping 
 - Normal Mapping 
-- add 4 spheres object to indicate point light and using ssbo to reduce attribute count in shader
+- add 24 spheres object to indicate point light and using ssbo to reduce attribute count in shader
 - pbr without image based lighting
-- horizontal grid plan
-- more objects for deferred shading
+- 
 - Depth reconstruction
-
-horizontal grid plan
-Here is the recommended order: PBR → Shadow Mapping → Deferred Shading.
-
-Implement G-Buffer: Create the textures and the "Geometry" shaders.
-
-Lighting Pass: Create the "Second Pass" that reads those textures.
 
 
 七、給你一個實戰任務（面試加分）

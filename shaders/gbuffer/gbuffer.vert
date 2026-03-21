@@ -1,8 +1,9 @@
 #version 450
 
+// GlobalUBO must match C++ GlobalUBO struct layout (std140)
 struct PointLight {
-    vec4 position;
-    vec4 color;
+    vec4 position; // xyz = world pos, w = intensity
+    vec4 color;    // xyz = RGB color, w = radius
 };
 
 layout (set = 0, binding = 0) uniform GlobalUBO {
@@ -25,17 +26,14 @@ layout (location = 2) in vec2 inTexCoord;
 layout (location = 3) in vec3 inColor;
 layout (location = 4) in vec4 inTangent;
 
-layout (location = 0) out vec3 fragPos;
-layout (location = 1) out vec3 fragNormal;
-layout (location = 2) out vec3 fragColor;
-layout (location = 3) out vec2 fragTexCoord;
-layout (location = 4) out vec4 fragTangent;
+layout (location = 0) out vec3 fragNormal;
+layout (location = 1) out vec3 fragColor;
+layout (location = 2) out vec2 fragTexCoord;
+layout (location = 3) out vec4 fragTangent;
 
 void main() {
     vec4 worldPos = pc.model * vec4(inPosition, 1.0);
     gl_Position = ubo.proj * ubo.view * worldPos;
-
-    fragPos = worldPos.xyz;
 
     mat3 normalMatrix = mat3(transpose(inverse(pc.model)));
     fragNormal = normalize(normalMatrix * inNormal);
