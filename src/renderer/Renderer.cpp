@@ -15,8 +15,7 @@
 #include "../common/Vertex.hpp"
 #include "common/Config.hpp"
 #include "scene/Mesh.hpp"
-#include "vulkan/GraphicsPipeline.hpp"
-#include "common/PushConstantConstant.hpp"
+#include "passes/SsaoPass.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/SwapChain.hpp"
 #include "vulkan/GBuffer.hpp"
@@ -64,8 +63,17 @@ Renderer::~Renderer() {
     std::cerr << "[Destructor] Renderer starting..." << std::endl;
     vkDeviceWaitIdle(context_.getDevice());
 
-    // Destroy G-buffer resources before pool (sets are freed when pool is destroyed)
+    // Destroy pass resources before pool (sets are freed when pool is destroyed)
+    ssaoPass_.reset();
     gbuffer_.reset();
+    if (ssaoNoiseSampler_) {
+        context_.getDevice().destroySampler(ssaoNoiseSampler_);
+        ssaoNoiseSampler_ = nullptr;
+    }
+    if (ssaoBufferLayout_) {
+        context_.getDevice().destroyDescriptorSetLayout(ssaoBufferLayout_);
+        ssaoBufferLayout_ = nullptr;
+    }
     if (gbufferSampler_) {
         context_.getDevice().destroySampler(gbufferSampler_);
         gbufferSampler_ = nullptr;
@@ -132,10 +140,12 @@ void Renderer::initResources() {
     createGBufferDescriptorSets();
 
     // Render passes (GBuffer must exist before GeometryPass is constructed)
-    forwardPass_  = std::make_unique<ForwardPass>(swapChain_);
+    forwardPass_ = std::make_unique<ForwardPass>(swapChain_);
     geometryPass_ = std::make_unique<GeometryPass>(swapChain_, *gbuffer_);
+    ssaoPass_ = std::make_unique<SsaoPass>(swapChain_, context_);
+    createSsaoDescriptorSets();
     lightingPass_ = std::make_unique<LightingPass>(swapChain_);
-    overlayPass_  = std::make_unique<OverlayPass>(swapChain_);
+    overlayPass_ = std::make_unique<OverlayPass>(swapChain_);
 }
 
 
@@ -189,6 +199,9 @@ void Renderer::renderDeferred(vk::CommandBuffer cmd,
                               uint32_t instanceCount) const {
     geometryPass_->execute(cmd, graphicsPipeline, descriptorSets_[currentFrame],
                            meshInstances, defaultMaterial, sphereMesh_);
+    ssaoPass_->execute(cmd, graphicsPipeline,
+                       descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame],
+                       ssaoBufferDescriptorSet_);
     lightingPass_->execute(cmd, graphicsPipeline, imageIndex,
                            descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame]);
     overlayPass_->execute(cmd, graphicsPipeline, imageIndex,
@@ -200,39 +213,40 @@ void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) co
     // driver can merge them, rather than issuing 2–4 separate sync points.
     auto makeColorBarrier = [](vk::Image image) {
         return vk::ImageMemoryBarrier2()
-            .setOldLayout(vk::ImageLayout::eUndefined)
-            .setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
-            .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-            .setSrcAccessMask(vk::AccessFlagBits2::eNone)
-            .setDstStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-            .setDstAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(image)
-            .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+               .setOldLayout(vk::ImageLayout::eUndefined)
+               .setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
+               .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+               .setSrcAccessMask(vk::AccessFlagBits2::eNone)
+               .setDstStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+               .setDstAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
+               .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+               .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+               .setImage(image)
+               .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
     };
 
     const vk::ImageMemoryBarrier2 depthBarrier = vk::ImageMemoryBarrier2()
-        .setOldLayout(vk::ImageLayout::eUndefined)
-        .setNewLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-        .setSrcStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                         vk::PipelineStageFlagBits2::eLateFragmentTests)
-        .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
-        .setDstStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                         vk::PipelineStageFlagBits2::eLateFragmentTests)
-        .setDstAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentRead |
-                          vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(swapChain_.getDepthImage())
-        .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
+                                                 .setOldLayout(vk::ImageLayout::eUndefined)
+                                                 .setNewLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
+                                                 .setSrcStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                                                                  vk::PipelineStageFlagBits2::eLateFragmentTests)
+                                                 .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+                                                 .setDstStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                                                                  vk::PipelineStageFlagBits2::eLateFragmentTests)
+                                                 .setDstAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentRead |
+                                                                   vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+                                                 .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                                                 .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                                                 .setImage(swapChain_.getDepthImage())
+                                                 .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
 
     if (renderPath_ == RenderPath::Deferred) {
-        std::array<vk::ImageMemoryBarrier2, 4> barriers = {
+        std::array<vk::ImageMemoryBarrier2, 5> barriers = {
             makeColorBarrier(swapChain_.getImages()[imageIndex]),
             depthBarrier,
             makeColorBarrier(gbuffer_->getAlbedoMetallicImage()),
             makeColorBarrier(gbuffer_->getNormalRoughnessImage()),
+            makeColorBarrier(ssaoPass_->getSsaoBufferImage()),
         };
         cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
     } else {
@@ -408,7 +422,7 @@ void Renderer::createUniformBuffers() {
 
 void Renderer::createInstanceBuffers() {
     constexpr uint32_t MAX_INSTANCES = 64;
-    const vk::DeviceSize bufferSize  = MAX_INSTANCES * sizeof(InstanceData);
+    const vk::DeviceSize bufferSize = MAX_INSTANCES * sizeof(InstanceData);
 
     instanceBuffers_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
     instanceAllocations_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
@@ -429,7 +443,7 @@ void Renderer::createInstanceBuffers() {
 }
 
 uint32_t Renderer::updateInstanceBuffer(const uint32_t currentFrame,
-                                         const std::vector<MeshInstance> &meshInstances) const {
+                                        const std::vector<MeshInstance> &meshInstances) const {
     if (!sphereMesh_)
         return 0;
 
@@ -493,12 +507,12 @@ void Renderer::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::Device
 }
 
 void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera,
-                                    const std::vector<PointLight> &pointLights) const {
+                                   const std::vector<PointLight> &pointLights) const {
     GlobalUBO ubo{};
-    ubo.view      = camera.getViewMatrix();
-    ubo.proj      = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
-    ubo.invView   = glm::inverse(ubo.view);
-    ubo.invProj   = glm::inverse(ubo.proj);
+    ubo.view = camera.getViewMatrix();
+    ubo.proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
+    ubo.invView = glm::inverse(ubo.view);
+    ubo.invProj = glm::inverse(ubo.proj);
     ubo.cameraPos = glm::vec4(camera.position, 0.0f);
 
     const size_t count = std::min(pointLights.size(), size_t{24});
@@ -512,7 +526,7 @@ void Renderer::createDescriptorPool() {
     // Pool Size 1: For the Global UBO (Set 0)
     constexpr auto uboPoolSize = vk::DescriptorPoolSize()
                                  .setType(vk::DescriptorType::eUniformBuffer)
-                                 .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
+                                 .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT + 1));
 
     // Pool Size 2: For the Instance SSBO (Set 0, binding 1)
     constexpr auto ssboPoolSize = vk::DescriptorPoolSize()
@@ -523,7 +537,7 @@ void Renderer::createDescriptorPool() {
     // Sponza has ~80 materials; G-buffer adds 3 per frame-in-flight
     constexpr auto samplerPoolSize = vk::DescriptorPoolSize()
                                      .setType(vk::DescriptorType::eCombinedImageSampler)
-                                     .setDescriptorCount(200 + 3 * engineConfig::MAX_FRAMES_IN_FLIGHT);
+                                     .setDescriptorCount(200 + 4 * engineConfig::MAX_FRAMES_IN_FLIGHT + 1);
 
     std::array<vk::DescriptorPoolSize, 3> poolSizes = {uboPoolSize, ssboPoolSize, samplerPoolSize};
     auto poolInfo = vk::DescriptorPoolCreateInfo()
@@ -556,17 +570,17 @@ void Renderer::createDescriptorSets() {
 
         std::array<vk::WriteDescriptorSet, 2> writes = {
             vk::WriteDescriptorSet()
-                .setDstSet(descriptorSets_[i])
-                .setDstBinding(0)
-                .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                .setDescriptorCount(1)
-                .setPBufferInfo(&uboInfo),
+            .setDstSet(descriptorSets_[i])
+            .setDstBinding(0)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&uboInfo),
             vk::WriteDescriptorSet()
-                .setDstSet(descriptorSets_[i])
-                .setDstBinding(1)
-                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-                .setDescriptorCount(1)
-                .setPBufferInfo(&ssboInfo),
+            .setDstSet(descriptorSets_[i])
+            .setDstBinding(1)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&ssboInfo),
         };
 
         context_.getDevice().updateDescriptorSets(writes, nullptr);
@@ -587,42 +601,94 @@ void Renderer::createGBufferDescriptorSets() {
 void Renderer::updateGBufferDescriptorSets() {
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         auto albedoInfo = vk::DescriptorImageInfo()
-            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setImageView(gbuffer_->getAlbedoMetallicView())
-            .setSampler(gbufferSampler_);
+                          .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                          .setImageView(gbuffer_->getAlbedoMetallicView())
+                          .setSampler(gbufferSampler_);
 
         auto normalInfo = vk::DescriptorImageInfo()
-            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setImageView(gbuffer_->getNormalRoughnessView())
-            .setSampler(gbufferSampler_);
+                          .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                          .setImageView(gbuffer_->getNormalRoughnessView())
+                          .setSampler(gbufferSampler_);
 
         auto depthInfo = vk::DescriptorImageInfo()
-            .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
-            .setImageView(swapChain_.getDepthImageView())
-            .setSampler(gbufferSampler_);
+                         .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
+                         .setImageView(swapChain_.getDepthImageView())
+                         .setSampler(gbufferSampler_);
 
         std::array<vk::WriteDescriptorSet, 3> writes = {
             vk::WriteDescriptorSet()
-                .setDstSet(gbufferDescriptorSets_[i])
-                .setDstBinding(0)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setDescriptorCount(1)
-                .setPImageInfo(&albedoInfo),
+            .setDstSet(gbufferDescriptorSets_[i])
+            .setDstBinding(0)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setPImageInfo(&albedoInfo),
             vk::WriteDescriptorSet()
-                .setDstSet(gbufferDescriptorSets_[i])
-                .setDstBinding(1)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setDescriptorCount(1)
-                .setPImageInfo(&normalInfo),
+            .setDstSet(gbufferDescriptorSets_[i])
+            .setDstBinding(1)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setPImageInfo(&normalInfo),
             vk::WriteDescriptorSet()
-                .setDstSet(gbufferDescriptorSets_[i])
-                .setDstBinding(2)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setDescriptorCount(1)
-                .setPImageInfo(&depthInfo),
+            .setDstSet(gbufferDescriptorSets_[i])
+            .setDstBinding(2)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setPImageInfo(&depthInfo),
         };
 
         context_.getDevice().updateDescriptorSets(writes, nullptr);
+    }
+}
+
+void Renderer::createSsaoDescriptorSets() {
+    // Single static set — kernel and noise are immutable after upload
+    auto allocInfo = vk::DescriptorSetAllocateInfo()
+                     .setDescriptorPool(descriptorPool_)
+                     .setSetLayouts(ssaoBufferLayout_);
+    ssaoBufferDescriptorSet_ = context_.getDevice().allocateDescriptorSets(allocInfo)[0];
+
+    auto ssaoKernel = vk::DescriptorBufferInfo()
+                      .setBuffer(ssaoPass_->getKernelBuffer())
+                      .setOffset(0)
+                      .setRange(sizeof(SSAOKernelUBO));
+
+    auto ssaoNoise = vk::DescriptorImageInfo()
+                     .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                     .setImageView(ssaoPass_->getSsaoNoiseImageView())
+                     .setSampler(ssaoNoiseSampler_);
+
+    std::array<vk::WriteDescriptorSet, 2> writes = {
+        vk::WriteDescriptorSet()
+        .setDstSet(ssaoBufferDescriptorSet_)
+        .setDstBinding(0)
+        .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+        .setDescriptorCount(1)
+        .setPBufferInfo(&ssaoKernel),
+        vk::WriteDescriptorSet()
+        .setDstSet(ssaoBufferDescriptorSet_)
+        .setDstBinding(1)
+        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setDescriptorCount(1)
+        .setPImageInfo(&ssaoNoise)
+    };
+
+    context_.getDevice().updateDescriptorSets(writes, nullptr);
+
+    // Write SSAO output buffer into gbuffer descriptor set (binding 3) for the lighting pass
+    for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
+        auto ssaoBufferInfo = vk::DescriptorImageInfo()
+                              .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                              .setImageView(ssaoPass_->getSsaoKernelBufferImageView())
+                              .setSampler(gbufferSampler_);
+
+        auto write = vk::WriteDescriptorSet()
+                     .setDstSet(gbufferDescriptorSets_[i])
+                     .setDstBinding(3)
+                     .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                     .setDescriptorCount(1)
+                     .setPImageInfo(&ssaoBufferInfo);
+
+        context_.getDevice().updateDescriptorSets(write, nullptr);
     }
 }
 
@@ -633,8 +699,8 @@ vk::DescriptorSet Renderer::createTextureDescriptorSet(
     const vk::Sampler sampler) {
     // 1. Allocate a single set using the Texture Layout (Set 1)
     const auto allocInfo = vk::DescriptorSetAllocateInfo()
-                     .setDescriptorPool(descriptorPool_)
-                     .setSetLayouts(textureLayout_); // This is the layout you created for Set 1
+                           .setDescriptorPool(descriptorPool_)
+                           .setSetLayouts(textureLayout_); // This is the layout you created for Set 1
 
     // allocateDescriptorSets returns a vector; we just need the first one
     const vk::DescriptorSet textureSet = context_.getDevice().allocateDescriptorSets(allocInfo)[0];
@@ -692,16 +758,16 @@ void Renderer::createDescriptorSetLayout() {
         std::array<vk::DescriptorSetLayoutBinding, 2> globalBindings = {
             // Binding 0: Camera UBO
             vk::DescriptorSetLayoutBinding()
-                .setBinding(0)
-                .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                .setDescriptorCount(1)
-                .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment),
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment),
             // Binding 1: Instance SSBO
             vk::DescriptorSetLayoutBinding()
-                .setBinding(1)
-                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-                .setDescriptorCount(1)
-                .setStageFlags(vk::ShaderStageFlagBits::eVertex),
+            .setBinding(1)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex),
         };
 
         vk::DescriptorSetLayoutCreateInfo globalInfo({}, globalBindings);
@@ -729,7 +795,7 @@ void Renderer::createDescriptorSetLayout() {
 
     // --- [SET 2]: G-BUFFER INPUTS (deferred lighting pass) ---
     {
-        std::array<vk::DescriptorSetLayoutBinding, 3> gbufferBindings = {
+        std::array<vk::DescriptorSetLayoutBinding, 4> gbufferBindings = {
             // Binding 0: Albedo + Metallic
             vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
@@ -739,21 +805,50 @@ void Renderer::createDescriptorSetLayout() {
             // Binding 2: Depth (for world-position reconstruction)
             vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
+            // Binding 4: Ssao buffer
+            vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
         };
 
         vk::DescriptorSetLayoutCreateInfo gbufferInfo({}, gbufferBindings);
         gbufferLayout_ = device.createDescriptorSetLayout(gbufferInfo);
     }
 
+    // --- [SET 3]: SSAO INPUTS (ssao pass) ---
+    {
+        std::array<vk::DescriptorSetLayoutBinding, 2> ssaoBindings = {
+            // Binding 0: kernel
+            vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+            // Binding 1: noise
+            vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+
+        };
+
+        vk::DescriptorSetLayoutCreateInfo ssaoBufferInfo({}, ssaoBindings);
+        ssaoBufferLayout_ = device.createDescriptorSetLayout(ssaoBufferInfo);
+    }
+
     // --- G-buffer nearest sampler (no filtering — texels map 1:1 to pixels) ---
     {
         auto samplerInfo = vk::SamplerCreateInfo()
-            .setMagFilter(vk::Filter::eNearest)
-            .setMinFilter(vk::Filter::eNearest)
-            .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
-            .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
-            .setAddressModeW(vk::SamplerAddressMode::eClampToEdge);
+                           .setMagFilter(vk::Filter::eNearest)
+                           .setMinFilter(vk::Filter::eNearest)
+                           .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+                           .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+                           .setAddressModeW(vk::SamplerAddressMode::eClampToEdge);
         gbufferSampler_ = device.createSampler(samplerInfo);
+    }
+    {
+        auto noiseInfo = vk::SamplerCreateInfo()
+                         .setMagFilter(vk::Filter::eNearest)
+                         .setMinFilter(vk::Filter::eNearest)
+                         .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+                         .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+                         .setAddressModeW(vk::SamplerAddressMode::eRepeat);
+        ssaoNoiseSampler_ = device.createSampler(noiseInfo);
+
     }
 }
 

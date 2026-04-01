@@ -25,6 +25,7 @@ namespace DescriptorSets {
 constexpr uint32_t GLOBAL_SET = 0;   // Set 0: Camera, Time, Lights, Instance SSBO
 constexpr uint32_t MATERIAL_SET = 1; // Set 1: Albedo, Normal, MR
 constexpr uint32_t GBUFFER_SET = 2;  // Set 2: G-buffer textures (deferred lighting pass)
+constexpr uint32_t SSAO_SET = 3;
 }
 
 /// Runtime toggle between forward and deferred rendering paths.

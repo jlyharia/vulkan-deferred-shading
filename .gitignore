@@ -3,5 +3,5 @@ build
 cmake-build-debug
 CMakeUserPresets.json
 conan_provider.cmake
-rd.rdc
+*.rdc
 claude/local/

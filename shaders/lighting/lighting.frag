@@ -22,6 +22,7 @@ layout (set = 0, binding = 0) uniform GlobalUBO {
 layout (set = 2, binding = 0) uniform sampler2D gbAlbedoMetallic;
 layout (set = 2, binding = 1) uniform sampler2D gbNormalRoughness;
 layout (set = 2, binding = 2) uniform sampler2D gbDepth;
+layout (set = 2, binding = 3) uniform sampler2D ssaoBuffer;
 
 const float PI = 3.14159265359;
 
@@ -127,7 +128,8 @@ void main() {
     }
 
     // Ambient (simple approximation)
-    vec3 ambient = vec3(0.01) * albedo;
+    float ao = texture(ssaoBuffer, inUV).r;
+    vec3 ambient = vec3(0.05) * albedo * ao;
 
     vec3 color = ambient + Lo;
 
@@ -135,5 +137,5 @@ void main() {
     color = color / (color + vec3(1.0));
     color = pow(color, vec3(1.0 / 2.2));
 
-    outColor = vec4(color, 1.0);
+    outColor = vec4(vec3(ao), 1.0);
 }

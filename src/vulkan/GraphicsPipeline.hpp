@@ -40,8 +40,10 @@ public:
     [[nodiscard]] vk::Pipeline getLightingPipeline()      const { return lightingPipeline_; }
     [[nodiscard]] vk::Pipeline getOverlayUnlitPipeline() const { return overlayUnlitPipeline_; }
 
+    [[nodiscard]] vk::Pipeline getSsaoPipeline() const { return ssaoPipeline_; }
+    [[nodiscard]] vk::Pipeline getSsaoBlurPipeline() const { return ssaoBlurPipeline_; }
     [[nodiscard]] vk::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
-
+    // question. do i need to have pipeline for each shader?
 private:
     VulkanContext &context_;
     SwapChain &swapChain_;
@@ -56,6 +58,8 @@ private:
     vk::Pipeline gbufferPipeline_;      // geometry pass: 2 color MRT + depth write
     vk::Pipeline lightingPipeline_;     // fullscreen triangle: 1 color, no depth, no vertex input
     vk::Pipeline overlayUnlitPipeline_; // forward overlay: 1 color, depth test ON, depth write OFF
+    vk::Pipeline ssaoPipeline_;
+    vk::Pipeline ssaoBlurPipeline_;
 
     void createPipelineLayout(const std::vector<vk::DescriptorSetLayout> &desLayouts);
     [[nodiscard]] vk::Pipeline buildPipeline(const PipelineConfig &config) const;
