@@ -69,6 +69,16 @@ GraphicsPipeline::GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
         .depthTestEnable = true,
         .depthWriteEnable = false,
     });
+
+    ssaoPipeline_ = buildPipeline({
+        .vertSpv = "shaders/ssao/ssao.vert.spv",
+        .fragSpv = "shaders/ssao/ssao.frag.spv",
+        .colorFormats = {vk::Format::eR8Unorm},
+        .hasVertexInput = false,
+        .depthTestEnable = false,
+        .depthWriteEnable = false,
+        .cullMode = vk::CullModeFlagBits::eNone, // fullscreen triangle — no culling, similar to lighting pass
+    });
 }
 
 GraphicsPipeline::~GraphicsPipeline() {
@@ -78,6 +88,7 @@ GraphicsPipeline::~GraphicsPipeline() {
     device.destroyPipeline(gbufferPipeline_);
     device.destroyPipeline(lightingPipeline_);
     device.destroyPipeline(overlayUnlitPipeline_);
+    device.destroyPipeline(ssaoPipeline_);
     device.destroyPipelineLayout(pipelineLayout_);
 }
 

@@ -14,6 +14,7 @@
 
 #include "common/Config.hpp"
 
+class SsaoPass;
 struct Texture;
 class Mesh;
 class UserInterface;
@@ -55,7 +56,7 @@ public:
 
     [[nodiscard]] std::vector<vk::DescriptorSetLayout> getDescriptorSetLayouts() const {
         // The order here MUST match your set = 0, set = 1, set = 2 in GLSL
-        return {globalDescriptorSetLayout_, textureLayout_, gbufferLayout_};
+        return {globalDescriptorSetLayout_, textureLayout_, gbufferLayout_, ssaoBufferLayout_};
     }
 
     [[nodiscard]] GBuffer &getGBuffer() const { return *gbuffer_; }
@@ -110,6 +111,7 @@ private:
     void createDescriptorSets();
     void createGBufferDescriptorSets();
     void updateGBufferDescriptorSets();
+    void createSsaoDescriptorSets();
 
     void transitionImageLayout(vk::CommandBuffer cmd,
                                vk::Image image,
@@ -157,11 +159,16 @@ private:
     std::unique_ptr<GBuffer> gbuffer_;
     vk::DescriptorSetLayout gbufferLayout_;
     std::vector<vk::DescriptorSet> gbufferDescriptorSets_; // one per frame-in-flight
+    // todo should reuse gbuffer?
     vk::Sampler gbufferSampler_; // nearest-neighbor, clamp-to-edge
 
+    vk::DescriptorSetLayout ssaoBufferLayout_;
+    vk::DescriptorSet ssaoBufferDescriptorSet_;
+    vk::Sampler ssaoNoiseSampler_;
     // Render passes (initialized in initResources, after GBuffer is ready)
     std::unique_ptr<ForwardPass> forwardPass_;
     std::unique_ptr<GeometryPass> geometryPass_;
+    std::unique_ptr<SsaoPass> ssaoPass_;
     std::unique_ptr<LightingPass> lightingPass_;
     std::unique_ptr<OverlayPass> overlayPass_;
 

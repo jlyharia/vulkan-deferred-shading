@@ -102,6 +102,8 @@ add_executable(${TARGET_NAME}
         src/scene/MeshUtils.hpp
         src/vulkan/GBuffer.hpp
         src/vulkan/GBuffer.cpp
+        src/renderer/passes/SsaoPass.cpp
+        src/renderer/passes/SsaoPass.hpp
 )
 
 # ------------------------------------------------------------

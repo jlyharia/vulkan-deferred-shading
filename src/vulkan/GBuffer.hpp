@@ -46,6 +46,7 @@ public:
 
     /// G-buffer attachment formats (used by pipeline creation and descriptor writes).
     static constexpr vk::Format ALBEDO_METALLIC_FORMAT = vk::Format::eR8G8B8A8Unorm;
+    // normal need higher precision than albedo
     static constexpr vk::Format NORMAL_ROUGHNESS_FORMAT = vk::Format::eR16G16B16A16Sfloat;
 
 private:
