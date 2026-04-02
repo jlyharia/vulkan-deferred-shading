@@ -46,7 +46,11 @@ vec3 reconstructViewPos(vec2 uv, float depth) {
 void main() {
     // --- Sample G-buffer ---
     vec3 normalInView = normalize(mat3(ubo.view) * texture(gbNormalRoughness, inUV).xyz);
-    vec3 randomVec = texture(SSAONoise, inUV * 4.0).xyz; // tile noise texture
+    // Tile the 4x4 noise texture once per pixel: scale = screenRes / noiseRes.
+    // Using a fixed multiplier (e.g. 4.0) tiles the texture only N times across
+    // the screen, producing large visible blocks — each block screenWidth/N pixels wide.
+    vec2 noiseScale = vec2(textureSize(gbNormalRoughness, 0)) / 4.0;
+    vec3 randomVec = texture(SSAONoise, inUV * noiseScale).xyz;
     // Gramm-Schmidt orthogonalization
     // TBN [XYZ], cross(T,B) = N, cross(N, T) = B
     vec3 tangent = normalize(randomVec - normalInView * dot(normalInView, randomVec));
@@ -73,6 +77,6 @@ void main() {
     }
     // occlusion factor, the smaller, the more occlude it get
     float occlusionFactor = 1.0 - occlusion / 64.0;
-//    outColor = vec4(vec3(occlusionFactor), 1.0);
+    //    outColor = vec4(vec3(occlusionFactor), 1.0);
     outColor = occlusionFactor;
 }

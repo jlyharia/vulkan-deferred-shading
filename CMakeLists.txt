@@ -104,6 +104,8 @@ add_executable(${TARGET_NAME}
         src/vulkan/GBuffer.cpp
         src/renderer/passes/SsaoPass.cpp
         src/renderer/passes/SsaoPass.hpp
+        src/renderer/passes/SsaoBlurPass.cpp
+        src/renderer/passes/SsaoBlurPass.hpp
 )
 
 # ------------------------------------------------------------

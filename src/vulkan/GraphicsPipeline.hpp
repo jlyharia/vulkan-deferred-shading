@@ -25,7 +25,8 @@ struct PipelineConfig {
 class GraphicsPipeline {
 public:
     GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
-                     const std::vector<vk::DescriptorSetLayout> &descriptorSetLayouts);
+                     const std::vector<vk::DescriptorSetLayout> &descriptorSetLayouts,
+                     vk::DescriptorSetLayout ssaoBlurLayout);
     ~GraphicsPipeline();
 
     GraphicsPipeline(const GraphicsPipeline &) = delete;
@@ -43,12 +44,14 @@ public:
     [[nodiscard]] vk::Pipeline getSsaoPipeline() const { return ssaoPipeline_; }
     [[nodiscard]] vk::Pipeline getSsaoBlurPipeline() const { return ssaoBlurPipeline_; }
     [[nodiscard]] vk::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
+    [[nodiscard]] vk::PipelineLayout getSsaoBlurPipelineLayout() const { return ssaoBlurPipelineLayout_; }
     // question. do i need to have pipeline for each shader?
 private:
     VulkanContext &context_;
     SwapChain &swapChain_;
 
     vk::PipelineLayout pipelineLayout_;
+    vk::PipelineLayout ssaoBlurPipelineLayout_;
 
     // Forward
     vk::Pipeline pbrPipeline_;
@@ -62,6 +65,8 @@ private:
     vk::Pipeline ssaoBlurPipeline_;
 
     void createPipelineLayout(const std::vector<vk::DescriptorSetLayout> &desLayouts);
-    [[nodiscard]] vk::Pipeline buildPipeline(const PipelineConfig &config) const;
+    void createSsaoBlurPipelineLayout(vk::DescriptorSetLayout blurLayout);
+    [[nodiscard]] vk::Pipeline buildPipeline(const PipelineConfig &config,
+                                             vk::PipelineLayout layout = {}) const;
     [[nodiscard]] vk::ShaderModule createShaderModule(const std::vector<char> &code) const;
 };

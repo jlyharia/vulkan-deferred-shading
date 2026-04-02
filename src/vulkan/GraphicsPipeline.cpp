@@ -23,10 +23,12 @@ std::vector<char> readFile(const std::string &filename) {
 } // namespace
 
 GraphicsPipeline::GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
-                                   const std::vector<vk::DescriptorSetLayout> &descriptorSetLayouts)
+                                   const std::vector<vk::DescriptorSetLayout> &descriptorSetLayouts,
+                                   vk::DescriptorSetLayout ssaoBlurLayout)
     : context_(context), swapChain_(swapChain) {
 
     createPipelineLayout(descriptorSetLayouts);
+    createSsaoBlurPipelineLayout(ssaoBlurLayout);
 
     vk::Format swapFormat = swapChain_.getColorFormat();
 
@@ -77,8 +79,18 @@ GraphicsPipeline::GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
         .hasVertexInput = false,
         .depthTestEnable = false,
         .depthWriteEnable = false,
-        .cullMode = vk::CullModeFlagBits::eNone, // fullscreen triangle — no culling, similar to lighting pass
+        .cullMode = vk::CullModeFlagBits::eNone,
     });
+
+    ssaoBlurPipeline_ = buildPipeline({
+        .vertSpv = "shaders/ssaoblur/ssaoblur.vert.spv",
+        .fragSpv = "shaders/ssaoblur/ssaoblur.frag.spv",
+        .colorFormats = {vk::Format::eR8Unorm},
+        .hasVertexInput = false,
+        .depthTestEnable = false,
+        .depthWriteEnable = false,
+        .cullMode = vk::CullModeFlagBits::eNone,
+    }, ssaoBlurPipelineLayout_);
 }
 
 GraphicsPipeline::~GraphicsPipeline() {
@@ -89,10 +101,13 @@ GraphicsPipeline::~GraphicsPipeline() {
     device.destroyPipeline(lightingPipeline_);
     device.destroyPipeline(overlayUnlitPipeline_);
     device.destroyPipeline(ssaoPipeline_);
+    device.destroyPipeline(ssaoBlurPipeline_);
+    device.destroyPipelineLayout(ssaoBlurPipelineLayout_);
     device.destroyPipelineLayout(pipelineLayout_);
 }
 
-vk::Pipeline GraphicsPipeline::buildPipeline(const PipelineConfig &config) const {
+vk::Pipeline GraphicsPipeline::buildPipeline(const PipelineConfig &config,
+                                             vk::PipelineLayout layout) const {
     auto vertShaderCode = readFile(config.vertSpv);
     auto fragShaderCode = readFile(config.fragSpv);
 
@@ -172,7 +187,7 @@ vk::Pipeline GraphicsPipeline::buildPipeline(const PipelineConfig &config) const
                         .setPDepthStencilState(&depthStencil)
                         .setPColorBlendState(&colorBlending)
                         .setPDynamicState(&dynamicStateInfo)
-                        .setLayout(pipelineLayout_);
+                        .setLayout(layout ? layout : pipelineLayout_);
 
     auto result = context_.getDevice().createGraphicsPipeline(nullptr, pipelineInfo);
     if (result.result != vk::Result::eSuccess)
@@ -202,4 +217,11 @@ void GraphicsPipeline::createPipelineLayout(const std::vector<vk::DescriptorSetL
                                     .setPushConstantRanges(pushConstantRange);
 
     pipelineLayout_ = context_.getDevice().createPipelineLayout(pipelineLayoutInfo);
+}
+
+void GraphicsPipeline::createSsaoBlurPipelineLayout(vk::DescriptorSetLayout blurLayout) {
+    // Blur pipeline uses a single descriptor set (set = 0) with depth + raw SSAO.
+    // No push constants needed.
+    const auto layoutInfo = vk::PipelineLayoutCreateInfo().setSetLayouts(blurLayout);
+    ssaoBlurPipelineLayout_ = context_.getDevice().createPipelineLayout(layoutInfo);
 }

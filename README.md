@@ -31,6 +31,24 @@ Step
    ```
 6. conan build command `conan install . --output-folder=build --build=missing`
 
+You're under-invested in things that matter more:
+
+┌───────────────────────────┬────────────────────────────────┬─────────────────────────────┐                       
+│           Item            │             Signal             │           Effort            │
+├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
+│ Shadow maps               │ Required baseline              │ High — but you need it      │
+├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤
+│ Reversed-Z                │ Shows GPU precision awareness  │ Low — do this now           │                       
+├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
+│ SSAO                      │ Good visual/algorithm signal   │ Medium                      │                       
+├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
+│ Render graph              │ Strong differentiator          │ High                        │
+├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
+│ Stencil (standalone)      │ Noise                          │ Low — but what's the point? │
+├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
+│ Stencil for light volumes │ Real technique, visible payoff │ Medium                      │
+└───────────────────────────┴────────────────────────────────┴─────────────────────────────┘
+
 ## Todo
 1. Delete vulkan resources per frame.
 2. Move vulkan resource destroy into queue.

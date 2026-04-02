@@ -59,7 +59,9 @@ void App::initVulkan() {
                                                    *textureManager_, *renderer_);
 
     graphicsPipeline_ = std::make_unique<GraphicsPipeline>(
-        *vulkanContext_, *swapchain_, renderer_->getDescriptorSetLayouts());
+        *vulkanContext_, *swapchain_,
+        renderer_->getDescriptorSetLayouts(),
+        renderer_->getSsaoBlurLayout());
 
     userInterface_ = std::make_unique<UserInterface>(*vulkanContext_, *swapchain_, window_);
 
