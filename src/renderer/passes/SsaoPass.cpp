@@ -4,6 +4,7 @@
 
 #include "SsaoPass.hpp"
 
+#include "PassUtils.hpp"
 #include "common/Config.hpp"
 #include "vulkan/GraphicsPipeline.hpp"
 #include "vulkan/SwapChain.hpp"
@@ -28,12 +29,8 @@ void SsaoPass::execute(vk::CommandBuffer cmd,
     auto extent = swapChain_.getExtent();
     const vk::PipelineLayout layout = pipeline.getPipelineLayout();
 
-    // for ssao pass render target
-    auto colorAttachment = vk::RenderingAttachmentInfo()
-                           .setImageView(ssaoBufferImageView_)
-                           .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-                           .setLoadOp(vk::AttachmentLoadOp::eDontCare)
-                           .setStoreOp(vk::AttachmentStoreOp::eStore);
+    auto colorAttachment = pass_util::colorAttachment(ssaoBuffer_.view,
+                                                       vk::AttachmentLoadOp::eDontCare);
 
     vk::RenderingInfo renderingInfo{};
     renderingInfo.setRenderArea({{0, 0}, extent})
@@ -42,11 +39,7 @@ void SsaoPass::execute(vk::CommandBuffer cmd,
 
     cmd.beginRendering(renderingInfo);
     {
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+        pass_util::setViewportScissor(cmd, extent);
 
         cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getSsaoPipeline());
 
@@ -65,28 +58,10 @@ void SsaoPass::execute(vk::CommandBuffer cmd,
         cmd.draw(3, 1, 0, 0); // fullscreen triangle — no vertex buffer
     }
     cmd.endRendering();
-    // todo refactor barrier code to put in a free function with namespace
-    // Pipeline barrier: ssao buffer → shader-read for lighting pass
-    auto makeColorBarrier = [](vk::Image image) {
-        return vk::ImageMemoryBarrier2()
-               .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-               .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
-               .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
-               .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
-               .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
-               .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-               .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-               .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-               .setImage(image)
-               .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
-    };
 
-    vk::ImageMemoryBarrier2 barriers = makeColorBarrier(this->ssaoBufferImage_);
-
-    vk::DependencyInfo depInfo;
-    depInfo.setImageMemoryBarriers(barriers);
-
-    cmd.pipelineBarrier2(depInfo);
+    // Pipeline barrier: SSAO buffer → shader-read for blur pass
+    auto barrier = vk_util::colorAttachmentToShaderRead(ssaoBuffer_.image);
+    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
 }
 
 /**
@@ -94,55 +69,20 @@ void SsaoPass::execute(vk::CommandBuffer cmd,
  * Generate 4x4 random noise texture
  */
 void SsaoPass::generateSsaoNoise() {
-    std::vector<glm::vec4> ssaoNoise;
+    // RG16F: only XY components used (rotation vector in tangent space).
+    // GLSL samples as vec4(r, g, 0, 1) — the zero z is correct.
+    std::vector<glm::vec2> ssaoNoise;
     for (unsigned int i = 0; i < 16; i++) {
-        glm::vec4 noise(generateRandomFloat() * 2.0f - 1.0f,
-                        generateRandomFloat() * 2.0f - 1.0f,
-                        0.0f,
-                        0.0f // unused
-            );
-        // rotate around z-axis (in tangent space)
-        ssaoNoise.push_back(noise);
+        ssaoNoise.push_back({generateRandomFloat() * 2.0f - 1.0f,
+                             generateRandomFloat() * 2.0f - 1.0f});
     }
-    const auto allocator = context_.getVmaAllocator();
-    const auto device = context_.getDevice();
-    const auto queue = context_.getGraphicsQueue();
-    const auto commandPool = context_.getTransferCommandPool();
-    const vk::DeviceSize bufferSize = sizeof(glm::vec4) * 16;
-
-    // staging buffer
-    vk::Buffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    vk_util::createBuffer(allocator, bufferSize,
-                          vk::BufferUsageFlagBits::eTransferSrc,
-                          VMA_MEMORY_USAGE_CPU_ONLY,
-                          stagingBuffer, stagingAlloc);
-    void *mapped;
-    vmaMapMemory(allocator, stagingAlloc, &mapped);
-    memcpy(mapped, ssaoNoise.data(), bufferSize);
-    vmaUnmapMemory(allocator, stagingAlloc);
-
-    // create image
-    vk_util::createImage(allocator, 4, 4, SSAO_NOISE_FORMAT,
-                         vk::ImageTiling::eOptimal,
-                         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-                         VMA_MEMORY_USAGE_GPU_ONLY,
-                         ssaoNoiseImage_, ssaoNoiseAllocation_);
-
-    // upload
-    vk_util::transitionImageLayout(device, commandPool, queue,
-                                   ssaoNoiseImage_, SSAO_NOISE_FORMAT,
-                                   vk::ImageLayout::eUndefined,
-                                   vk::ImageLayout::eTransferDstOptimal);
-    vk_util::copyBufferToImage(device, commandPool, queue,
-                               stagingBuffer, ssaoNoiseImage_, 4, 4);
-    vk_util::transitionImageLayout(device, commandPool, queue,
-                                   ssaoNoiseImage_, SSAO_NOISE_FORMAT,
-                                   vk::ImageLayout::eTransferDstOptimal,
-                                   vk::ImageLayout::eShaderReadOnlyOptimal);
-
-    ssaoNoiseImageView_ = vk_util::createImageView(device, ssaoNoiseImage_, SSAO_NOISE_FORMAT);
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
+    vk_util::uploadToDeviceImage(
+        context_.getVmaAllocator(), context_.getDevice(),
+        context_.getTransferCommandPool(), context_.getGraphicsQueue(),
+        ssaoNoise.data(), sizeof(glm::vec2) * 16,
+        4, 4, SSAO_NOISE_FORMAT,
+        ssaoNoiseImage_, ssaoNoiseAllocation_);
+    ssaoNoiseImageView_ = vk_util::createImageView(context_.getDevice(), ssaoNoiseImage_, SSAO_NOISE_FORMAT);
 
 }
 
@@ -194,28 +134,15 @@ float SsaoPass::generateRandomFloat() {
 
 void SsaoPass::createImages(uint32_t width, uint32_t height) {
     constexpr auto usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
-    const auto device = context_.getDevice();
-    const auto allocator = context_.getVmaAllocator();
-
-    // RT0: occlusion factor — 1 byte/pixel
-    vk_util::createImage(allocator, width, height,
-                         SSAO_BUFFER_FORMAT,
-                         vk::ImageTiling::eOptimal,
-                         usage,
-                         VMA_MEMORY_USAGE_GPU_ONLY,
-                         ssaoBufferImage_,
-                         ssaoBufferAlloc_);
-    ssaoBufferImageView_ = vk_util::createImageView(device, ssaoBufferImage_, SSAO_BUFFER_FORMAT);
+    ssaoBuffer_ = vk_util::AttachmentImage::create(context_.getVmaAllocator(), context_.getDevice(),
+                                                    width, height, SSAO_BUFFER_FORMAT, usage);
 }
 
 void SsaoPass::cleanup() {
-    auto device = context_.getDevice();
+    auto device    = context_.getDevice();
     auto allocator = context_.getVmaAllocator();
 
-    if (ssaoBufferImageView_)
-        device.destroyImageView(ssaoBufferImageView_);
-    if (ssaoBufferImage_)
-        vmaDestroyImage(allocator, ssaoBufferImage_, ssaoBufferAlloc_);
+    ssaoBuffer_.cleanup(device, allocator);
 
     if (ssaoNoiseImageView_)
         device.destroyImageView(ssaoNoiseImageView_);

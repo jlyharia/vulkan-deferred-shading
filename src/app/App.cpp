@@ -52,20 +52,19 @@ void App::initVulkan() {
     swapchain_ = std::make_unique<SwapChain>(*vulkanContext_, window_);
 
     renderer_ = std::make_unique<Renderer>(*vulkanContext_, *swapchain_, window_);
-    renderer_->createDescriptorSetLayout();
 
     textureManager_ = std::make_unique<TextureManager>(*vulkanContext_);
     assetManager_ = std::make_unique<AssetManager>(*vulkanContext_, vulkanContext_->getMainCommandPool(),
                                                    *textureManager_, *renderer_);
 
+    userInterface_ = std::make_unique<UserInterface>(*vulkanContext_, *swapchain_, window_);
+
+    renderer_->initResources();
+
     graphicsPipeline_ = std::make_unique<GraphicsPipeline>(
         *vulkanContext_, *swapchain_,
         renderer_->getDescriptorSetLayouts(),
         renderer_->getSsaoBlurLayout());
-
-    userInterface_ = std::make_unique<UserInterface>(*vulkanContext_, *swapchain_, window_);
-
-    renderer_->initResources();
     renderer_->setupDefaultMaterial(
         textureManager_->getWhiteFallback()->imageView,
         textureManager_->getFlatNormalFallback()->imageView,

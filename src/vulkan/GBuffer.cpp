@@ -32,53 +32,16 @@ void GBuffer::recreate(uint32_t width, uint32_t height) {
  */
 void GBuffer::createImages(uint32_t width, uint32_t height) {
     constexpr auto usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
-    auto device = context_.getDevice();
+    auto device    = context_.getDevice();
     auto allocator = context_.getVmaAllocator();
 
-    // RT0: Albedo (rgb) + Metallic (a) — 4 bytes/pixel
-    vk_util::createImage(allocator, width, height,
-                         ALBEDO_METALLIC_FORMAT,
-                         vk::ImageTiling::eOptimal,
-                         usage,
-                         VMA_MEMORY_USAGE_GPU_ONLY,
-                         albedoMetallicImage_,
-                         albedoMetallicAlloc_);
-    albedoMetallicView_ = vk_util::createImageView(device, albedoMetallicImage_,
-                                                    ALBEDO_METALLIC_FORMAT);
-
-    // RT1: World Normal (xyz) + Roughness (a) — 8 bytes/pixel
-    vk_util::createImage(allocator, width, height,
-                         NORMAL_ROUGHNESS_FORMAT,
-                         vk::ImageTiling::eOptimal,
-                         usage,
-                         VMA_MEMORY_USAGE_GPU_ONLY,
-                         normalRoughnessImage_,
-                         normalRoughnessAlloc_);
-    normalRoughnessView_ = vk_util::createImageView(device, normalRoughnessImage_,
-                                                     NORMAL_ROUGHNESS_FORMAT);
+    albedoMetallic_  = vk_util::AttachmentImage::create(allocator, device, width, height,
+                                                         ALBEDO_METALLIC_FORMAT, usage);
+    normalRoughness_ = vk_util::AttachmentImage::create(allocator, device, width, height,
+                                                         NORMAL_ROUGHNESS_FORMAT, usage);
 }
 
 void GBuffer::cleanup() {
-    auto device = context_.getDevice();
-    auto allocator = context_.getVmaAllocator();
-
-    if (albedoMetallicView_) {
-        device.destroyImageView(albedoMetallicView_);
-        albedoMetallicView_ = nullptr;
-    }
-    if (albedoMetallicImage_) {
-        vmaDestroyImage(allocator, albedoMetallicImage_, albedoMetallicAlloc_);
-        albedoMetallicImage_ = nullptr;
-        albedoMetallicAlloc_ = nullptr;
-    }
-
-    if (normalRoughnessView_) {
-        device.destroyImageView(normalRoughnessView_);
-        normalRoughnessView_ = nullptr;
-    }
-    if (normalRoughnessImage_) {
-        vmaDestroyImage(allocator, normalRoughnessImage_, normalRoughnessAlloc_);
-        normalRoughnessImage_ = nullptr;
-        normalRoughnessAlloc_ = nullptr;
-    }
+    albedoMetallic_.cleanup(context_.getDevice(), context_.getVmaAllocator());
+    normalRoughness_.cleanup(context_.getDevice(), context_.getVmaAllocator());
 }

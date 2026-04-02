@@ -41,7 +41,6 @@ public:
     Renderer &operator=(const Renderer &) = delete;
 
     void initResources();
-    void createDescriptorSetLayout();
 
     void drawFrame(const GraphicsPipeline &graphicsPipeline,
                    bool framebufferResized,
@@ -98,32 +97,21 @@ private:
     void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
     void finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
 
-    void createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage vmaUsage, vk::Buffer &buffer,
-                      VmaAllocation &allocation, VmaAllocationCreateFlags vmaFlags = 0,
-                      VmaAllocationInfo *outAllocInfo = nullptr) const;
-
-    void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const;
-
     void createUniformBuffers();
     void updateUniformBuffer(uint32_t currentFrame, const Camera &camera,
                              const std::vector<PointLight> &pointLights) const;
     void createInstanceBuffers();
     [[nodiscard]] uint32_t updateInstanceBuffer(uint32_t currentFrame,
                                                 const std::vector<MeshInstance> &meshInstances) const;
+    void createDescriptorSetLayout();
     void createDescriptorPool();
     void createDescriptorSets();
     void createGBufferDescriptorSets();
     void updateGBufferDescriptorSets();
     void createSsaoDescriptorSets();
     void createSsaoBlurDescriptorSet();
+    void updateSsaoDescriptorSets();
     void updateSsaoBlurDescriptorSet();
-
-    void transitionImageLayout(vk::CommandBuffer cmd,
-                               vk::Image image,
-                               vk::ImageLayout oldLayout,
-                               vk::ImageLayout newLayout,
-                               vk::ImageAspectFlags aspectMask) const;
-
 
     // --- Members ---
     VulkanContext &context_;
@@ -165,7 +153,7 @@ private:
     vk::DescriptorSetLayout gbufferLayout_;
     std::vector<vk::DescriptorSet> gbufferDescriptorSets_; // one per frame-in-flight
     // todo should reuse gbuffer?
-    vk::Sampler gbufferSampler_; // nearest-neighbor, clamp-to-edge
+    vk::Sampler nearestClampSampler_; // nearest-neighbor, clamp-to-edge — shared by gbuffer + SSAO reads
 
     vk::DescriptorSetLayout ssaoBufferLayout_;
     vk::DescriptorSet ssaoBufferDescriptorSet_;

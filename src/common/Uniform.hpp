@@ -19,6 +19,9 @@ struct GlobalUBO {
     alignas(16) PointLight pointLights[24]; // matches GLSL std140
 };
 
+inline constexpr uint32_t SSAO_KERNEL_SIZE = 64;
+
 struct SSAOKernelUBO {
-    alignas(16) glm::vec4 samples[64];
+    alignas(16) glm::vec4 samples[SSAO_KERNEL_SIZE];
 };
+static_assert(sizeof(SSAOKernelUBO) == SSAO_KERNEL_SIZE * sizeof(glm::vec4));

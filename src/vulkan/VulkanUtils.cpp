@@ -12,7 +12,8 @@ void createBuffer(
     VmaMemoryUsage vmaUsage,
     vk::Buffer &buffer,
     VmaAllocation &allocation,
-    VmaAllocationCreateFlags vmaFlags) {
+    VmaAllocationCreateFlags vmaFlags,
+    VmaAllocationInfo *outAllocInfo) {
     VkBufferCreateInfo bufferInfo = vk::BufferCreateInfo()
                                     .setSize(size)
                                     .setUsage(usage)
@@ -23,7 +24,7 @@ void createBuffer(
     allocInfo.flags = vmaFlags;
 
     VkBuffer rawBuffer;
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &rawBuffer, &allocation, nullptr) != VK_SUCCESS) {
+    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &rawBuffer, &allocation, outAllocInfo) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create buffer via VMA!");
     }
     buffer = rawBuffer;
@@ -209,6 +210,135 @@ vk::CommandBuffer beginSingleTimeCommands(vk::Device device,
     commandBuffer.begin(beginInfo);
 
     return commandBuffer;
+}
+
+AttachmentImage AttachmentImage::create(
+    VmaAllocator         allocator,
+    vk::Device           device,
+    uint32_t             width,
+    uint32_t             height,
+    vk::Format           format,
+    vk::ImageUsageFlags  usage,
+    vk::ImageAspectFlags aspectFlags) {
+
+    AttachmentImage result;
+    createImage(allocator, width, height, format, vk::ImageTiling::eOptimal,
+                usage, VMA_MEMORY_USAGE_GPU_ONLY, result.image, result.allocation);
+    result.view = createImageView(device, result.image, format, aspectFlags);
+    return result;
+}
+
+void AttachmentImage::cleanup(vk::Device device, VmaAllocator allocator) noexcept {
+    if (view)  { device.destroyImageView(view);                        view  = nullptr; }
+    if (image) { vmaDestroyImage(allocator, image, allocation); image = nullptr; allocation = nullptr; }
+}
+
+vk::ImageMemoryBarrier2 colorAttachmentToShaderRead(vk::Image image) noexcept {
+    return vk::ImageMemoryBarrier2()
+           .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+           .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
+           .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
+           .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
+           .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
+           .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setImage(image)
+           .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+}
+
+vk::ImageMemoryBarrier2 depthToShaderRead(vk::Image image) noexcept {
+    return vk::ImageMemoryBarrier2()
+           .setSrcStageMask(vk::PipelineStageFlagBits2::eLateFragmentTests)
+           .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+           .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
+           .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
+           .setOldLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
+           .setNewLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
+           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setImage(image)
+           .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
+}
+
+vk::ImageMemoryBarrier2 undefinedToColorAttachment(vk::Image image) noexcept {
+    return vk::ImageMemoryBarrier2()
+           .setOldLayout(vk::ImageLayout::eUndefined)
+           .setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
+           .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+           .setSrcAccessMask(vk::AccessFlagBits2::eNone)
+           .setDstStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+           .setDstAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
+           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setImage(image)
+           .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+}
+
+vk::ImageMemoryBarrier2 colorAttachmentToPresent(vk::Image image) noexcept {
+    return vk::ImageMemoryBarrier2()
+           .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
+           .setNewLayout(vk::ImageLayout::ePresentSrcKHR)
+           .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+           .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
+           .setDstStageMask(vk::PipelineStageFlagBits2::eBottomOfPipe)
+           .setDstAccessMask(vk::AccessFlagBits2::eNone)
+           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setImage(image)
+           .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+}
+
+vk::WriteDescriptorSet imageSamplerWrite(
+    vk::DescriptorSet              set,
+    uint32_t                       binding,
+    const vk::DescriptorImageInfo &imageInfo) noexcept {
+    return vk::WriteDescriptorSet()
+           .setDstSet(set)
+           .setDstBinding(binding)
+           .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+           .setDescriptorCount(1)
+           .setPImageInfo(&imageInfo);
+}
+
+void uploadToDeviceImage(
+    VmaAllocator    allocator,
+    vk::Device      device,
+    vk::CommandPool commandPool,
+    vk::Queue       queue,
+    const void     *data,
+    vk::DeviceSize  dataSize,
+    uint32_t        width,
+    uint32_t        height,
+    vk::Format      format,
+    vk::Image      &outImage,
+    VmaAllocation  &outAlloc) {
+    // 1. Staging buffer
+    vk::Buffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+    createBuffer(allocator, dataSize, vk::BufferUsageFlagBits::eTransferSrc,
+                 VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer, stagingAlloc);
+
+    void *mapped;
+    vmaMapMemory(allocator, stagingAlloc, &mapped);
+    memcpy(mapped, data, static_cast<size_t>(dataSize));
+    vmaUnmapMemory(allocator, stagingAlloc);
+
+    // 2. GPU image
+    createImage(allocator, width, height, format, vk::ImageTiling::eOptimal,
+                vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+                VMA_MEMORY_USAGE_GPU_ONLY, outImage, outAlloc);
+
+    // 3. Upload: undefined → transfer-dst → shader-read
+    transitionImageLayout(device, commandPool, queue,
+                          outImage, format,
+                          vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+    copyBufferToImage(device, commandPool, queue, stagingBuffer, outImage, width, height);
+    transitionImageLayout(device, commandPool, queue,
+                          outImage, format,
+                          vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+
+    vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
 }
 
 void endSingleTimeCommands(vk::Device device,

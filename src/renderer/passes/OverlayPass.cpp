@@ -1,5 +1,6 @@
 #include "OverlayPass.hpp"
 
+#include "PassUtils.hpp"
 #include "common/Config.hpp"
 #include "scene/Mesh.hpp"
 #include "vulkan/GraphicsPipeline.hpp"
@@ -19,18 +20,15 @@ void OverlayPass::execute(vk::CommandBuffer cmd,
     const vk::PipelineLayout layout = pipeline.getPipelineLayout();
 
     // Load the lit result from the lighting pass
-    auto colorAttachment = vk::RenderingAttachmentInfo()
-        .setImageView(swapChain_.getImageViews()[imageIndex])
-        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eLoad)
-        .setStoreOp(vk::AttachmentStoreOp::eStore);
+    auto colorAttachment = pass_util::colorAttachment(
+        swapChain_.getImageViews()[imageIndex], vk::AttachmentLoadOp::eLoad);
 
     // Depth in read-only layout — depth test ON, depth write OFF (via pipeline state)
-    auto depthAttachment = vk::RenderingAttachmentInfo()
-        .setImageView(swapChain_.getDepthImageView())
-        .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eLoad)
-        .setStoreOp(vk::AttachmentStoreOp::eNone);
+    auto depthAttachment = pass_util::depthAttachment(
+        swapChain_.getDepthImageView(),
+        vk::ImageLayout::eDepthReadOnlyOptimal,
+        vk::AttachmentLoadOp::eLoad,
+        vk::AttachmentStoreOp::eNone);
 
     vk::RenderingInfo renderingInfo{};
     renderingInfo.setRenderArea({{0, 0}, extent})
@@ -40,11 +38,7 @@ void OverlayPass::execute(vk::CommandBuffer cmd,
 
     cmd.beginRendering(renderingInfo);
     {
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+        pass_util::setViewportScissor(cmd, extent);
 
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                layout, DescriptorSets::GLOBAL_SET,

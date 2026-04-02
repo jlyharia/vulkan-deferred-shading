@@ -5,6 +5,33 @@
 #pragma once
 #include "common/VulkanInclude.hpp"
 
+// =============================================================================
+// AttachmentImage — owns a GPU render-target image (image + view + allocation).
+// All three resources are always created and destroyed together.
+// =============================================================================
+namespace vk_util {
+
+struct AttachmentImage {
+    vk::Image     image{};
+    vk::ImageView view{};
+    VmaAllocation allocation{};
+
+    [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(image); }
+
+    static AttachmentImage create(
+        VmaAllocator         allocator,
+        vk::Device           device,
+        uint32_t             width,
+        uint32_t             height,
+        vk::Format           format,
+        vk::ImageUsageFlags  usage,
+        vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor);
+
+    void cleanup(vk::Device device, VmaAllocator allocator) noexcept;
+};
+
+} // namespace vk_util
+
 namespace vk_util {
 
 // 1. Generic Buffer Creation (VMA)
@@ -15,7 +42,8 @@ void createBuffer(
     VmaMemoryUsage vmaUsage,
     vk::Buffer &buffer,
     VmaAllocation &allocation,
-    VmaAllocationCreateFlags vmaFlags = 0);
+    VmaAllocationCreateFlags vmaFlags = 0,
+    VmaAllocationInfo *outAllocInfo = nullptr);
 
 void copyBuffer(
     vk::Device device,
@@ -66,6 +94,54 @@ vk::ImageView createImageView(
     vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor,
     const uint32_t mipLevels = 1
     );
+
+// =============================================================================
+// Barrier factories — common image layout transitions for the render loop.
+// All return ImageMemoryBarrier2 (Vulkan 1.3 synchronization2).
+// =============================================================================
+
+// COLOR_ATTACHMENT_OPTIMAL → SHADER_READ_ONLY_OPTIMAL (after a color attachment write)
+[[nodiscard]] vk::ImageMemoryBarrier2 colorAttachmentToShaderRead(vk::Image image) noexcept;
+
+// DEPTH_STENCIL_ATTACHMENT_OPTIMAL → DEPTH_READ_ONLY_OPTIMAL (after geometry depth write)
+[[nodiscard]] vk::ImageMemoryBarrier2 depthToShaderRead(vk::Image image) noexcept;
+
+// UNDEFINED → COLOR_ATTACHMENT_OPTIMAL (frame-start transition for color targets)
+[[nodiscard]] vk::ImageMemoryBarrier2 undefinedToColorAttachment(vk::Image image) noexcept;
+
+// COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR (end-of-frame presentation transition)
+[[nodiscard]] vk::ImageMemoryBarrier2 colorAttachmentToPresent(vk::Image image) noexcept;
+
+// =============================================================================
+// Descriptor write helpers
+// =============================================================================
+
+// Builds a WriteDescriptorSet for a combined-image-sampler binding.
+// The caller must keep imageInfo alive until device.updateDescriptorSets returns.
+[[nodiscard]] vk::WriteDescriptorSet imageSamplerWrite(
+    vk::DescriptorSet              set,
+    uint32_t                       binding,
+    const vk::DescriptorImageInfo &imageInfo) noexcept;
+
+// =============================================================================
+// uploadToDeviceImage — one-shot staging upload for sampled images.
+// Allocates a staging buffer, uploads data, creates the GPU image,
+// transitions layout to eShaderReadOnlyOptimal, and cleans up staging.
+// The caller is responsible for creating the ImageView afterwards.
+// Not suitable for mip-generating uploads (see TextureManager::getOrCreateTexture).
+// =============================================================================
+void uploadToDeviceImage(
+    VmaAllocator       allocator,
+    vk::Device         device,
+    vk::CommandPool    commandPool,
+    vk::Queue          queue,
+    const void        *data,
+    vk::DeviceSize     dataSize,
+    uint32_t           width,
+    uint32_t           height,
+    vk::Format         format,
+    vk::Image         &outImage,
+    VmaAllocation     &outAlloc);
 
 // 5. One-Time Command Helper (Internal use)
 vk::CommandBuffer beginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool);

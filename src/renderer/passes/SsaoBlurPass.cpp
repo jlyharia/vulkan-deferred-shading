@@ -4,6 +4,7 @@
 
 #include "SsaoBlurPass.hpp"
 
+#include "PassUtils.hpp"
 #include "SsaoPass.hpp"
 #include "common/Config.hpp"
 #include "vulkan/SwapChain.hpp"
@@ -19,12 +20,7 @@ SsaoBlurPass::SsaoBlurPass(SwapChain &swapChain, VulkanContext &context) : swapC
 SsaoBlurPass::~SsaoBlurPass() { cleanup(); }
 
 void SsaoBlurPass::cleanup() {
-    auto device    = context_.getDevice();
-    auto allocator = context_.getVmaAllocator();
-    if (ssaoBlurBufferImageView_)
-        device.destroyImageView(ssaoBlurBufferImageView_);
-    if (ssaoBlurBufferImage_)
-        vmaDestroyImage(allocator, ssaoBlurBufferImage_, ssaoBlurBufferAlloc_);
+    ssaoBlurBuffer_.cleanup(context_.getDevice(), context_.getVmaAllocator());
 }
 
 void SsaoBlurPass::execute(vk::CommandBuffer cmd,
@@ -33,11 +29,8 @@ void SsaoBlurPass::execute(vk::CommandBuffer cmd,
     auto extent = swapChain_.getExtent();
     const vk::PipelineLayout layout = pipeline.getSsaoBlurPipelineLayout();
 
-    auto colorAttachment = vk::RenderingAttachmentInfo()
-                           .setImageView(ssaoBlurBufferImageView_)
-                           .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-                           .setLoadOp(vk::AttachmentLoadOp::eDontCare)
-                           .setStoreOp(vk::AttachmentStoreOp::eStore);
+    auto colorAttachment = pass_util::colorAttachment(ssaoBlurBuffer_.view,
+                                                       vk::AttachmentLoadOp::eDontCare);
 
     vk::RenderingInfo renderingInfo{};
     renderingInfo.setRenderArea({{0, 0}, extent})
@@ -46,11 +39,7 @@ void SsaoBlurPass::execute(vk::CommandBuffer cmd,
 
     cmd.beginRendering(renderingInfo);
     {
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+        pass_util::setViewportScissor(cmd, extent);
 
         cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getSsaoBlurPipeline());
         // Blur pipeline has its own layout with a single set (index 0): depth + raw SSAO
@@ -60,35 +49,12 @@ void SsaoBlurPass::execute(vk::CommandBuffer cmd,
     cmd.endRendering();
 
     // Barrier: blurred output → shader-read for lighting pass
-    auto barrier = vk::ImageMemoryBarrier2()
-                   .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-                   .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
-                   .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
-                   .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
-                   .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
-                   .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-                   .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                   .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                   .setImage(ssaoBlurBufferImage_)
-                   .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
-
-    vk::DependencyInfo depInfo;
-    depInfo.setImageMemoryBarriers(barrier);
-    cmd.pipelineBarrier2(depInfo);
+    auto barrier = vk_util::colorAttachmentToShaderRead(ssaoBlurBuffer_.image);
+    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
 }
 
 void SsaoBlurPass::createImages(uint32_t width, uint32_t height) {
     constexpr auto usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
-    const auto device = context_.getDevice();
-    const auto allocator = context_.getVmaAllocator();
-
-    // RT0: occlusion factor — 1 byte/pixel
-    vk_util::createImage(allocator, width, height,
-                         SSAO_BLUR_BUFFER_FORMAT,
-                         vk::ImageTiling::eOptimal,
-                         usage,
-                         VMA_MEMORY_USAGE_GPU_ONLY,
-                         ssaoBlurBufferImage_,
-                         ssaoBlurBufferAlloc_);
-    ssaoBlurBufferImageView_ = vk_util::createImageView(device, ssaoBlurBufferImage_, SSAO_BLUR_BUFFER_FORMAT);
+    ssaoBlurBuffer_ = vk_util::AttachmentImage::create(context_.getVmaAllocator(), context_.getDevice(),
+                                                        width, height, SSAO_BLUR_BUFFER_FORMAT, usage);
 }

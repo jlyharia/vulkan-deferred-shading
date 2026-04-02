@@ -1,5 +1,6 @@
 #include "ForwardPass.hpp"
 
+#include "PassUtils.hpp"
 #include "common/Config.hpp"
 #include "common/PushConstantConstant.hpp"
 #include "scene/Mesh.hpp"
@@ -16,19 +17,17 @@ void ForwardPass::execute(vk::CommandBuffer cmd,
                           uint32_t instanceCount,
                           const Material &defaultMaterial,
                           const std::shared_ptr<Mesh> &sphereMesh) const {
-    auto colorAttachment = vk::RenderingAttachmentInfo()
-        .setImageView(swapChain_.getImageViews()[imageIndex])
-        .setImageLayout(vk::ImageLayout::eAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.02f, 0.02f, 0.02f, 1.0f}));
+    auto colorAttachment = pass_util::colorAttachment(
+        swapChain_.getImageViews()[imageIndex],
+        vk::AttachmentLoadOp::eClear,
+        vk::ClearColorValue(std::array<float, 4>{0.02f, 0.02f, 0.02f, 1.0f}));
 
-    auto depthAttachment = vk::RenderingAttachmentInfo()
-        .setImageView(swapChain_.getDepthImageView())
-        .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setClearValue(vk::ClearDepthStencilValue(1.0f, 0));
+    auto depthAttachment = pass_util::depthAttachment(
+        swapChain_.getDepthImageView(),
+        vk::ImageLayout::eDepthStencilAttachmentOptimal,
+        vk::AttachmentLoadOp::eClear,
+        vk::AttachmentStoreOp::eStore,
+        vk::ClearDepthStencilValue(1.0f, 0));
 
     const auto extent = swapChain_.getExtent();
     vk::RenderingInfo renderingInfo{};
@@ -41,11 +40,7 @@ void ForwardPass::execute(vk::CommandBuffer cmd,
 
     cmd.beginRendering(renderingInfo);
     {
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+        pass_util::setViewportScissor(cmd, extent);
 
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                layout, DescriptorSets::GLOBAL_SET,
@@ -54,6 +49,8 @@ void ForwardPass::execute(vk::CommandBuffer cmd,
         vk::Pipeline currentPipeline = nullptr;
 
         // --- NON-INSTANCED PASS: everything except sphere instances ---
+        // Per-mesh draw loop (intentional mirror of GeometryPass — see GeometryPass.cpp).
+        // ForwardPass handles pipeline switching per-submesh; GeometryPass skips unlit materials.
         for (const auto &[mesh, transform, name, color] : meshInstances) {
             if (!mesh) continue;
             if (sphereMesh && mesh == sphereMesh) continue;

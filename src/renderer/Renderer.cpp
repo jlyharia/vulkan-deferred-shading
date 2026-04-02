@@ -20,6 +20,7 @@
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/SwapChain.hpp"
 #include "vulkan/GBuffer.hpp"
+#include "vulkan/VulkanUtils.hpp"
 #include "renderer/passes/ForwardPass.hpp"
 #include "renderer/passes/GeometryPass.hpp"
 #include "renderer/passes/LightingPass.hpp"
@@ -80,9 +81,9 @@ Renderer::~Renderer() {
         context_.getDevice().destroyDescriptorSetLayout(ssaoBufferLayout_);
         ssaoBufferLayout_ = nullptr;
     }
-    if (gbufferSampler_) {
-        context_.getDevice().destroySampler(gbufferSampler_);
-        gbufferSampler_ = nullptr;
+    if (nearestClampSampler_) {
+        context_.getDevice().destroySampler(nearestClampSampler_);
+        nearestClampSampler_ = nullptr;
     }
     if (gbufferLayout_) {
         vkDestroyDescriptorSetLayout(context_.getDevice(), gbufferLayout_, nullptr);
@@ -135,6 +136,7 @@ Renderer::~Renderer() {
 }
 
 void Renderer::initResources() {
+    createDescriptorSetLayout();
     createUniformBuffers();
     createInstanceBuffers();
     createDescriptorPool();
@@ -220,20 +222,6 @@ void Renderer::renderDeferred(vk::CommandBuffer cmd,
 void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {
     // Batch all frame-start layout transitions into a single pipelineBarrier2 call so the
     // driver can merge them, rather than issuing 2–4 separate sync points.
-    auto makeColorBarrier = [](vk::Image image) {
-        return vk::ImageMemoryBarrier2()
-               .setOldLayout(vk::ImageLayout::eUndefined)
-               .setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
-               .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-               .setSrcAccessMask(vk::AccessFlagBits2::eNone)
-               .setDstStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-               .setDstAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
-               .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-               .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-               .setImage(image)
-               .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
-    };
-
     const vk::ImageMemoryBarrier2 depthBarrier = vk::ImageMemoryBarrier2()
                                                  .setOldLayout(vk::ImageLayout::eUndefined)
                                                  .setNewLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
@@ -251,17 +239,17 @@ void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) co
 
     if (renderPath_ == RenderPath::Deferred) {
         std::array<vk::ImageMemoryBarrier2, 6> barriers = {
-            makeColorBarrier(swapChain_.getImages()[imageIndex]),
+            vk_util::undefinedToColorAttachment(swapChain_.getImages()[imageIndex]),
             depthBarrier,
-            makeColorBarrier(gbuffer_->getAlbedoMetallicImage()),
-            makeColorBarrier(gbuffer_->getNormalRoughnessImage()),
-            makeColorBarrier(ssaoPass_->getSsaoBufferImage()),
-            makeColorBarrier(ssaoBlurPass_->getBlurredImage()),
+            vk_util::undefinedToColorAttachment(gbuffer_->getAlbedoMetallicImage()),
+            vk_util::undefinedToColorAttachment(gbuffer_->getNormalRoughnessImage()),
+            vk_util::undefinedToColorAttachment(ssaoPass_->getSsaoBufferImage()),
+            vk_util::undefinedToColorAttachment(ssaoBlurPass_->getBlurredImage()),
         };
         cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
     } else {
         std::array<vk::ImageMemoryBarrier2, 2> barriers = {
-            makeColorBarrier(swapChain_.getImages()[imageIndex]),
+            vk_util::undefinedToColorAttachment(swapChain_.getImages()[imageIndex]),
             depthBarrier,
         };
         cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
@@ -270,10 +258,8 @@ void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) co
 
 void Renderer::finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {
     // Transition Swapchain: ColorAttachment -> PresentSource
-    transitionImageLayout(cmd, swapChain_.getImages()[imageIndex],
-                          vk::ImageLayout::eColorAttachmentOptimal,
-                          vk::ImageLayout::ePresentSrcKHR,
-                          vk::ImageAspectFlagBits::eColor);
+    auto barrier = vk_util::colorAttachmentToPresent(swapChain_.getImages()[imageIndex]);
+    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
 }
 
 void Renderer::createSyncObjects() {
@@ -408,6 +394,7 @@ void Renderer::recreateSwapChain() {
     ssaoBlurPass_.reset();
     ssaoPass_   = std::make_unique<SsaoPass>(swapChain_, context_);
     ssaoBlurPass_ = std::make_unique<SsaoBlurPass>(swapChain_, context_);
+    updateSsaoDescriptorSets();
     updateSsaoBlurDescriptorSet();
 
     // Note: Since we use Dynamic State for Viewport/Scissor,
@@ -424,16 +411,11 @@ void Renderer::createUniformBuffers() {
 
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         VmaAllocationInfo allocInfo;
-
-        createBuffer(bufferSize,
-                     vk::BufferUsageFlagBits::eUniformBuffer, // Changed to vk:: enum
-                     VMA_MEMORY_USAGE_CPU_TO_GPU,
-                     uniformBuffers_[i], // These are now vk::Buffer
-                     uniformBuffersAllocation_[i],
-                     VMA_ALLOCATION_CREATE_MAPPED_BIT,
-                     &allocInfo);
-
-        // Store the persistent pointer provided by the MAPPED flag
+        vk_util::createBuffer(context_.getVmaAllocator(), bufferSize,
+                              vk::BufferUsageFlagBits::eUniformBuffer,
+                              VMA_MEMORY_USAGE_CPU_TO_GPU,
+                              uniformBuffers_[i], uniformBuffersAllocation_[i],
+                              VMA_ALLOCATION_CREATE_MAPPED_BIT, &allocInfo);
         uniformBuffersMapped_[i] = allocInfo.pMappedData;
     }
 }
@@ -448,14 +430,11 @@ void Renderer::createInstanceBuffers() {
 
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         VmaAllocationInfo allocInfo;
-        createBuffer(bufferSize,
-                     vk::BufferUsageFlagBits::eStorageBuffer,
-                     VMA_MEMORY_USAGE_CPU_TO_GPU,
-                     instanceBuffers_[i],
-                     instanceAllocations_[i],
-                     VMA_ALLOCATION_CREATE_MAPPED_BIT,
-                     &allocInfo);
-
+        vk_util::createBuffer(context_.getVmaAllocator(), bufferSize,
+                              vk::BufferUsageFlagBits::eStorageBuffer,
+                              VMA_MEMORY_USAGE_CPU_TO_GPU,
+                              instanceBuffers_[i], instanceAllocations_[i],
+                              VMA_ALLOCATION_CREATE_MAPPED_BIT, &allocInfo);
         instanceBuffersMapped_[i] = allocInfo.pMappedData;
     }
 }
@@ -479,50 +458,6 @@ uint32_t Renderer::updateInstanceBuffer(const uint32_t currentFrame,
     return static_cast<uint32_t>(instances.size());
 }
 
-void Renderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage vmaUsage,
-                            vk::Buffer &buffer, VmaAllocation &allocation, VmaAllocationCreateFlags vmaFlags,
-                            VmaAllocationInfo *outAllocInfo) const {
-
-    // Convert vk:: types to raw C structs for VMA
-    VkBufferCreateInfo bufferInfo =
-        vk::BufferCreateInfo().setSize(size).setUsage(usage).setSharingMode(vk::SharingMode::eExclusive);
-
-    VmaAllocationCreateInfo allocInfo = {};
-    allocInfo.usage = vmaUsage;
-    allocInfo.flags = vmaFlags;
-
-    VkBuffer rawBuffer;
-    if (vmaCreateBuffer(context_.getVmaAllocator(), &bufferInfo, &allocInfo, &rawBuffer, &allocation, outAllocInfo) !=
-        VK_SUCCESS) {
-        throw std::runtime_error("failed to create buffer with VMA!");
-    }
-    buffer = rawBuffer;
-}
-
-void Renderer::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const {
-    vk::CommandBufferAllocateInfo allocInfo{};
-    allocInfo.setLevel(vk::CommandBufferLevel::ePrimary);
-    allocInfo.setCommandPool(context_.getMainCommandPool());
-    allocInfo.setCommandBufferCount(1);
-
-    auto cmd = context_.getDevice().allocateCommandBuffers(allocInfo)[0];
-
-    vk::CommandBufferBeginInfo beginInfo{};
-    beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-
-    cmd.begin(beginInfo);
-    vk::BufferCopy copyRegion(0, 0, size);
-    cmd.copyBuffer(srcBuffer, dstBuffer, copyRegion);
-    cmd.end();
-
-    vk::SubmitInfo submitInfo{};
-    submitInfo.setCommandBuffers(cmd);
-
-    context_.getGraphicsQueue().submit(submitInfo);
-    context_.getGraphicsQueue().waitIdle(); // Simple sync for one-time transfer
-
-    context_.getDevice().freeCommandBuffers(context_.getMainCommandPool(), cmd);
-}
 
 void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera,
                                    const std::vector<PointLight> &pointLights) const {
@@ -621,39 +556,21 @@ void Renderer::updateGBufferDescriptorSets() {
         auto albedoInfo = vk::DescriptorImageInfo()
                           .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
                           .setImageView(gbuffer_->getAlbedoMetallicView())
-                          .setSampler(gbufferSampler_);
-
+                          .setSampler(nearestClampSampler_);
         auto normalInfo = vk::DescriptorImageInfo()
                           .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
                           .setImageView(gbuffer_->getNormalRoughnessView())
-                          .setSampler(gbufferSampler_);
-
-        auto depthInfo = vk::DescriptorImageInfo()
-                         .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
-                         .setImageView(swapChain_.getDepthImageView())
-                         .setSampler(gbufferSampler_);
+                          .setSampler(nearestClampSampler_);
+        auto depthInfo  = vk::DescriptorImageInfo()
+                          .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
+                          .setImageView(swapChain_.getDepthImageView())
+                          .setSampler(nearestClampSampler_);
 
         std::array<vk::WriteDescriptorSet, 3> writes = {
-            vk::WriteDescriptorSet()
-            .setDstSet(gbufferDescriptorSets_[i])
-            .setDstBinding(0)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setPImageInfo(&albedoInfo),
-            vk::WriteDescriptorSet()
-            .setDstSet(gbufferDescriptorSets_[i])
-            .setDstBinding(1)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setPImageInfo(&normalInfo),
-            vk::WriteDescriptorSet()
-            .setDstSet(gbufferDescriptorSets_[i])
-            .setDstBinding(2)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setPImageInfo(&depthInfo),
+            vk_util::imageSamplerWrite(gbufferDescriptorSets_[i], 0, albedoInfo),
+            vk_util::imageSamplerWrite(gbufferDescriptorSets_[i], 1, normalInfo),
+            vk_util::imageSamplerWrite(gbufferDescriptorSets_[i], 2, depthInfo),
         };
-
         context_.getDevice().updateDescriptorSets(writes, nullptr);
     }
 }
@@ -664,7 +581,14 @@ void Renderer::createSsaoDescriptorSets() {
                      .setDescriptorPool(descriptorPool_)
                      .setSetLayouts(ssaoBufferLayout_);
     ssaoBufferDescriptorSet_ = context_.getDevice().allocateDescriptorSets(allocInfo)[0];
+    updateSsaoDescriptorSets();
+    // gbuffer binding 3 (ssao result for lighting) is written by createSsaoBlurDescriptorSet
+    // after the blur pass is constructed, so it points to the blurred output.
+}
 
+void Renderer::updateSsaoDescriptorSets() {
+    // Re-points the ssao buffer descriptor set to the current ssaoPass_ resources.
+    // Called both at creation and on recreateSwapChain (ssaoPass_ is torn down and rebuilt).
     auto ssaoKernel = vk::DescriptorBufferInfo()
                       .setBuffer(ssaoPass_->getKernelBuffer())
                       .setOffset(0)
@@ -682,17 +606,9 @@ void Renderer::createSsaoDescriptorSets() {
         .setDescriptorType(vk::DescriptorType::eUniformBuffer)
         .setDescriptorCount(1)
         .setPBufferInfo(&ssaoKernel),
-        vk::WriteDescriptorSet()
-        .setDstSet(ssaoBufferDescriptorSet_)
-        .setDstBinding(1)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setDescriptorCount(1)
-        .setPImageInfo(&ssaoNoise)
+        vk_util::imageSamplerWrite(ssaoBufferDescriptorSet_, 1, ssaoNoise),
     };
-
     context_.getDevice().updateDescriptorSets(writes, nullptr);
-    // gbuffer binding 3 (ssao result for lighting) is written by createSsaoBlurDescriptorSet
-    // after the blur pass is constructed, so it points to the blurred output.
 }
 
 void Renderer::createSsaoBlurDescriptorSet() {
@@ -708,23 +624,17 @@ void Renderer::updateSsaoBlurDescriptorSet() {
     auto depthInfo = vk::DescriptorImageInfo()
                      .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
                      .setImageView(swapChain_.getDepthImageView())
-                     .setSampler(gbufferSampler_);
+                     .setSampler(nearestClampSampler_);
 
     // binding 1: raw SSAO output (pre-blur)
     auto ssaoInfo = vk::DescriptorImageInfo()
                     .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
                     .setImageView(ssaoPass_->getSsaoKernelBufferImageView())
-                    .setSampler(gbufferSampler_);
+                    .setSampler(nearestClampSampler_);
 
     std::array<vk::WriteDescriptorSet, 2> writes = {
-        vk::WriteDescriptorSet()
-        .setDstSet(ssaoBlurDescriptorSet_).setDstBinding(0)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setDescriptorCount(1).setPImageInfo(&depthInfo),
-        vk::WriteDescriptorSet()
-        .setDstSet(ssaoBlurDescriptorSet_).setDstBinding(1)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setDescriptorCount(1).setPImageInfo(&ssaoInfo),
+        vk_util::imageSamplerWrite(ssaoBlurDescriptorSet_, 0, depthInfo),
+        vk_util::imageSamplerWrite(ssaoBlurDescriptorSet_, 1, ssaoInfo),
     };
     context_.getDevice().updateDescriptorSets(writes, nullptr);
 
@@ -733,15 +643,9 @@ void Renderer::updateSsaoBlurDescriptorSet() {
         auto blurredInfo = vk::DescriptorImageInfo()
                            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
                            .setImageView(ssaoBlurPass_->getBlurredImageView())
-                           .setSampler(gbufferSampler_);
+                           .setSampler(nearestClampSampler_);
 
-        auto write = vk::WriteDescriptorSet()
-                     .setDstSet(gbufferDescriptorSets_[i])
-                     .setDstBinding(3)
-                     .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                     .setDescriptorCount(1)
-                     .setPImageInfo(&blurredInfo);
-
+        auto write = vk_util::imageSamplerWrite(gbufferDescriptorSets_[i], 3, blurredInfo);
         context_.getDevice().updateDescriptorSets(write, nullptr);
     }
 }
@@ -775,30 +679,11 @@ vk::DescriptorSet Renderer::createTextureDescriptorSet(
                                 .setImageView(metallicRoughnessView) // Pass this in
                                 .setSampler(sampler);
 
-    // 4. Update the set with BOTH writes
-    std::array<vk::WriteDescriptorSet, 3> descriptorWrites{};
-
-    descriptorWrites[0] = vk::WriteDescriptorSet()
-                          .setDstSet(textureSet)
-                          .setDstBinding(0)
-                          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                          .setDescriptorCount(1)
-                          .setPImageInfo(&imageInfo);
-
-    descriptorWrites[1] = vk::WriteDescriptorSet()
-                          .setDstSet(textureSet)
-                          .setDstBinding(1) // <--- Normal Map Binding
-                          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                          .setDescriptorCount(1)
-                          .setPImageInfo(&normalInfo);
-
-    descriptorWrites[2] = vk::WriteDescriptorSet()
-                          .setDstSet(textureSet)
-                          .setDstBinding(2) // Binding 2: Metallic-Roughness
-                          .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                          .setDescriptorCount(1)
-                          .setPImageInfo(&metalRoughInfo);
-
+    std::array<vk::WriteDescriptorSet, 3> descriptorWrites = {
+        vk_util::imageSamplerWrite(textureSet, 0, imageInfo),
+        vk_util::imageSamplerWrite(textureSet, 1, normalInfo),
+        vk_util::imageSamplerWrite(textureSet, 2, metalRoughInfo),
+    };
     context_.getDevice().updateDescriptorSets(descriptorWrites, nullptr);
 
     return textureSet;
@@ -859,7 +744,7 @@ void Renderer::createDescriptorSetLayout() {
             // Binding 2: Depth (for world-position reconstruction)
             vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
-            // Binding 4: Ssao buffer
+            // Binding 4: Ssao buffer TODO should be ssao blur buffer once it is used
             vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
         };
@@ -905,7 +790,7 @@ void Renderer::createDescriptorSetLayout() {
                            .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
                            .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
                            .setAddressModeW(vk::SamplerAddressMode::eClampToEdge);
-        gbufferSampler_ = device.createSampler(samplerInfo);
+        nearestClampSampler_ = device.createSampler(samplerInfo);
     }
     {
         auto noiseInfo = vk::SamplerCreateInfo()
@@ -919,45 +804,6 @@ void Renderer::createDescriptorSetLayout() {
     }
 }
 
-void Renderer::transitionImageLayout(const vk::CommandBuffer cmd,
-                                     const vk::Image image,
-                                     const vk::ImageLayout oldLayout,
-                                     const vk::ImageLayout newLayout,
-                                     const vk::ImageAspectFlags aspectMask) const {
-    vk::ImageMemoryBarrier2 barrier;
-    barrier.setOldLayout(oldLayout)
-           .setNewLayout(newLayout)
-           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-           .setImage(image)
-           .setSubresourceRange(vk::ImageSubresourceRange(aspectMask, 0, 1, 0, 1));
-
-    // Define pipeline stages and access masks based on layouts
-    if (newLayout == vk::ImageLayout::eColorAttachmentOptimal) {
-        barrier.setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-               .setSrcAccessMask(vk::AccessFlagBits2::eNone)
-               .setDstStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-               .setDstAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite);
-    } else if (newLayout == vk::ImageLayout::ePresentSrcKHR) {
-        barrier.setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-               .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
-               .setDstStageMask(vk::PipelineStageFlagBits2::eBottomOfPipe)
-               .setDstAccessMask(vk::AccessFlagBits2::eNone);
-    } else if (newLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal) {
-        barrier.setSrcStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                                vk::PipelineStageFlagBits2::eLateFragmentTests)
-               .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
-               .setDstStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-                                vk::PipelineStageFlagBits2::eLateFragmentTests)
-               .setDstAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentRead |
-                                 vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
-    }
-
-    vk::DependencyInfo dependencyInfo;
-    dependencyInfo.setImageMemoryBarriers(barrier);
-
-    cmd.pipelineBarrier2(dependencyInfo);
-}
 
 void Renderer::setupDefaultMaterial(const vk::ImageView whiteView,
                                     const vk::ImageView normalView,
