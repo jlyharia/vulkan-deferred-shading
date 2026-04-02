@@ -16,6 +16,7 @@
 #include "common/Config.hpp"
 #include "scene/Mesh.hpp"
 #include "passes/SsaoPass.hpp"
+#include "passes/SsaoBlurPass.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/SwapChain.hpp"
 #include "vulkan/GBuffer.hpp"
@@ -64,11 +65,16 @@ Renderer::~Renderer() {
     vkDeviceWaitIdle(context_.getDevice());
 
     // Destroy pass resources before pool (sets are freed when pool is destroyed)
+    ssaoBlurPass_.reset();
     ssaoPass_.reset();
     gbuffer_.reset();
     if (ssaoNoiseSampler_) {
         context_.getDevice().destroySampler(ssaoNoiseSampler_);
         ssaoNoiseSampler_ = nullptr;
+    }
+    if (ssaoBlurLayout_) {
+        context_.getDevice().destroyDescriptorSetLayout(ssaoBlurLayout_);
+        ssaoBlurLayout_ = nullptr;
     }
     if (ssaoBufferLayout_) {
         context_.getDevice().destroyDescriptorSetLayout(ssaoBufferLayout_);
@@ -144,6 +150,8 @@ void Renderer::initResources() {
     geometryPass_ = std::make_unique<GeometryPass>(swapChain_, *gbuffer_);
     ssaoPass_ = std::make_unique<SsaoPass>(swapChain_, context_);
     createSsaoDescriptorSets();
+    ssaoBlurPass_ = std::make_unique<SsaoBlurPass>(swapChain_, context_);
+    createSsaoBlurDescriptorSet();
     lightingPass_ = std::make_unique<LightingPass>(swapChain_);
     overlayPass_ = std::make_unique<OverlayPass>(swapChain_);
 }
@@ -202,6 +210,7 @@ void Renderer::renderDeferred(vk::CommandBuffer cmd,
     ssaoPass_->execute(cmd, graphicsPipeline,
                        descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame],
                        ssaoBufferDescriptorSet_);
+    ssaoBlurPass_->execute(cmd, graphicsPipeline, ssaoBlurDescriptorSet_);
     lightingPass_->execute(cmd, graphicsPipeline, imageIndex,
                            descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame]);
     overlayPass_->execute(cmd, graphicsPipeline, imageIndex,
@@ -241,12 +250,13 @@ void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) co
                                                  .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
 
     if (renderPath_ == RenderPath::Deferred) {
-        std::array<vk::ImageMemoryBarrier2, 5> barriers = {
+        std::array<vk::ImageMemoryBarrier2, 6> barriers = {
             makeColorBarrier(swapChain_.getImages()[imageIndex]),
             depthBarrier,
             makeColorBarrier(gbuffer_->getAlbedoMetallicImage()),
             makeColorBarrier(gbuffer_->getNormalRoughnessImage()),
             makeColorBarrier(ssaoPass_->getSsaoBufferImage()),
+            makeColorBarrier(ssaoBlurPass_->getBlurredImage()),
         };
         cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
     } else {
@@ -391,6 +401,14 @@ void Renderer::recreateSwapChain() {
         gbuffer_->recreate(extent.width, extent.height);
         updateGBufferDescriptorSets();
     }
+
+    // 5. Recreate extent-sized SSAO/blur images and re-point their descriptor sets.
+    // The swapchain depth view is also new after recreate(), so both sets must be rewritten.
+    ssaoPass_.reset();
+    ssaoBlurPass_.reset();
+    ssaoPass_   = std::make_unique<SsaoPass>(swapChain_, context_);
+    ssaoBlurPass_ = std::make_unique<SsaoBlurPass>(swapChain_, context_);
+    updateSsaoBlurDescriptorSet();
 
     // Note: Since we use Dynamic State for Viewport/Scissor,
     // we do NOT need to recreate the Pipeline!
@@ -537,7 +555,7 @@ void Renderer::createDescriptorPool() {
     // Sponza has ~80 materials; G-buffer adds 3 per frame-in-flight
     constexpr auto samplerPoolSize = vk::DescriptorPoolSize()
                                      .setType(vk::DescriptorType::eCombinedImageSampler)
-                                     .setDescriptorCount(200 + 4 * engineConfig::MAX_FRAMES_IN_FLIGHT + 1);
+                                     .setDescriptorCount(200 + 4 * engineConfig::MAX_FRAMES_IN_FLIGHT + 1 + 2);
 
     std::array<vk::DescriptorPoolSize, 3> poolSizes = {uboPoolSize, ssboPoolSize, samplerPoolSize};
     auto poolInfo = vk::DescriptorPoolCreateInfo()
@@ -673,20 +691,56 @@ void Renderer::createSsaoDescriptorSets() {
     };
 
     context_.getDevice().updateDescriptorSets(writes, nullptr);
+    // gbuffer binding 3 (ssao result for lighting) is written by createSsaoBlurDescriptorSet
+    // after the blur pass is constructed, so it points to the blurred output.
+}
 
-    // Write SSAO output buffer into gbuffer descriptor set (binding 3) for the lighting pass
+void Renderer::createSsaoBlurDescriptorSet() {
+    auto allocInfo = vk::DescriptorSetAllocateInfo()
+                     .setDescriptorPool(descriptorPool_)
+                     .setSetLayouts(ssaoBlurLayout_);
+    ssaoBlurDescriptorSet_ = context_.getDevice().allocateDescriptorSets(allocInfo)[0];
+    updateSsaoBlurDescriptorSet();
+}
+
+void Renderer::updateSsaoBlurDescriptorSet() {
+    // binding 0: depth texture
+    auto depthInfo = vk::DescriptorImageInfo()
+                     .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
+                     .setImageView(swapChain_.getDepthImageView())
+                     .setSampler(gbufferSampler_);
+
+    // binding 1: raw SSAO output (pre-blur)
+    auto ssaoInfo = vk::DescriptorImageInfo()
+                    .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                    .setImageView(ssaoPass_->getSsaoKernelBufferImageView())
+                    .setSampler(gbufferSampler_);
+
+    std::array<vk::WriteDescriptorSet, 2> writes = {
+        vk::WriteDescriptorSet()
+        .setDstSet(ssaoBlurDescriptorSet_).setDstBinding(0)
+        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setDescriptorCount(1).setPImageInfo(&depthInfo),
+        vk::WriteDescriptorSet()
+        .setDstSet(ssaoBlurDescriptorSet_).setDstBinding(1)
+        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setDescriptorCount(1).setPImageInfo(&ssaoInfo),
+    };
+    context_.getDevice().updateDescriptorSets(writes, nullptr);
+
+    // Update gbuffer set binding 3 to point to the BLURRED output for the lighting pass
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
-        auto ssaoBufferInfo = vk::DescriptorImageInfo()
-                              .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-                              .setImageView(ssaoPass_->getSsaoKernelBufferImageView())
-                              .setSampler(gbufferSampler_);
+        auto blurredInfo = vk::DescriptorImageInfo()
+                           .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                           .setImageView(ssaoBlurPass_->getBlurredImageView())
+                           .setSampler(gbufferSampler_);
 
         auto write = vk::WriteDescriptorSet()
                      .setDstSet(gbufferDescriptorSets_[i])
                      .setDstBinding(3)
                      .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
                      .setDescriptorCount(1)
-                     .setPImageInfo(&ssaoBufferInfo);
+                     .setPImageInfo(&blurredInfo);
 
         context_.getDevice().updateDescriptorSets(write, nullptr);
     }
@@ -828,6 +882,19 @@ void Renderer::createDescriptorSetLayout() {
 
         vk::DescriptorSetLayoutCreateInfo ssaoBufferInfo({}, ssaoBindings);
         ssaoBufferLayout_ = device.createDescriptorSetLayout(ssaoBufferInfo);
+    }
+
+    // --- [SET for SSAO BLUR]: depth (binding 0) + raw SSAO (binding 1) ---
+    // Separate layout — blur pipeline has its own VkPipelineLayout (set = 0).
+    {
+        std::array<vk::DescriptorSetLayoutBinding, 2> blurBindings = {
+            vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+            vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+        };
+        vk::DescriptorSetLayoutCreateInfo blurInfo({}, blurBindings);
+        ssaoBlurLayout_ = device.createDescriptorSetLayout(blurInfo);
     }
 
     // --- G-buffer nearest sampler (no filtering — texels map 1:1 to pixels) ---

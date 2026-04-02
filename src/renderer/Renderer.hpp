@@ -14,6 +14,7 @@
 
 #include "common/Config.hpp"
 
+class SsaoBlurPass;
 class SsaoPass;
 struct Texture;
 class Mesh;
@@ -58,6 +59,8 @@ public:
         // The order here MUST match your set = 0, set = 1, set = 2 in GLSL
         return {globalDescriptorSetLayout_, textureLayout_, gbufferLayout_, ssaoBufferLayout_};
     }
+
+    [[nodiscard]] vk::DescriptorSetLayout getSsaoBlurLayout() const { return ssaoBlurLayout_; }
 
     [[nodiscard]] GBuffer &getGBuffer() const { return *gbuffer_; }
     [[nodiscard]] RenderPath getRenderPath() const { return renderPath_; }
@@ -112,6 +115,8 @@ private:
     void createGBufferDescriptorSets();
     void updateGBufferDescriptorSets();
     void createSsaoDescriptorSets();
+    void createSsaoBlurDescriptorSet();
+    void updateSsaoBlurDescriptorSet();
 
     void transitionImageLayout(vk::CommandBuffer cmd,
                                vk::Image image,
@@ -164,11 +169,14 @@ private:
 
     vk::DescriptorSetLayout ssaoBufferLayout_;
     vk::DescriptorSet ssaoBufferDescriptorSet_;
+    vk::DescriptorSetLayout ssaoBlurLayout_;
+    vk::DescriptorSet ssaoBlurDescriptorSet_;
     vk::Sampler ssaoNoiseSampler_;
     // Render passes (initialized in initResources, after GBuffer is ready)
     std::unique_ptr<ForwardPass> forwardPass_;
     std::unique_ptr<GeometryPass> geometryPass_;
     std::unique_ptr<SsaoPass> ssaoPass_;
+    std::unique_ptr<SsaoBlurPass> ssaoBlurPass_;
     std::unique_ptr<LightingPass> lightingPass_;
     std::unique_ptr<OverlayPass> overlayPass_;
 

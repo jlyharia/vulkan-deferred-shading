@@ -136,6 +136,6 @@ void main() {
     // Tone mapping (Reinhard) + gamma correction
     color = color / (color + vec3(1.0));
     color = pow(color, vec3(1.0 / 2.2));
-
-    outColor = vec4(vec3(ao), 1.0);
+    outColor = vec4(color, 1.0);
+//    outColor = vec4(vec3(ao), 1.0);
 }
