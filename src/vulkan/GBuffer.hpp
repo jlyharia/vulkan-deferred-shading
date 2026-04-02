@@ -4,6 +4,7 @@
 
 #pragma once
 #include "common/VulkanInclude.hpp"
+#include "VulkanUtils.hpp"
 
 class VulkanContext;
 
@@ -34,14 +35,14 @@ public:
 
     /// @name RT0 — Albedo (rgb) + Metallic (a)
     /// @{
-    [[nodiscard]] vk::ImageView getAlbedoMetallicView() const { return albedoMetallicView_; }
-    [[nodiscard]] vk::Image getAlbedoMetallicImage() const { return albedoMetallicImage_; }
+    [[nodiscard]] vk::ImageView getAlbedoMetallicView()  const { return albedoMetallic_.view; }
+    [[nodiscard]] vk::Image     getAlbedoMetallicImage() const { return albedoMetallic_.image; }
     /// @}
 
     /// @name RT1 — World Normal (xyz) + Roughness (a)
     /// @{
-    [[nodiscard]] vk::ImageView getNormalRoughnessView() const { return normalRoughnessView_; }
-    [[nodiscard]] vk::Image getNormalRoughnessImage() const { return normalRoughnessImage_; }
+    [[nodiscard]] vk::ImageView getNormalRoughnessView()  const { return normalRoughness_.view; }
+    [[nodiscard]] vk::Image     getNormalRoughnessImage() const { return normalRoughness_.image; }
     /// @}
 
     /// G-buffer attachment formats (used by pipeline creation and descriptor writes).
@@ -55,13 +56,6 @@ private:
 
     VulkanContext &context_;
 
-    // RT0
-    vk::Image albedoMetallicImage_;
-    VmaAllocation albedoMetallicAlloc_ = nullptr;
-    vk::ImageView albedoMetallicView_;
-
-    // RT1
-    vk::Image normalRoughnessImage_;
-    VmaAllocation normalRoughnessAlloc_ = nullptr;
-    vk::ImageView normalRoughnessView_;
+    vk_util::AttachmentImage albedoMetallic_;   // RT0: albedo (rgb) + metallic (a)
+    vk_util::AttachmentImage normalRoughness_;  // RT1: world normal (xyz) + roughness (a)
 };

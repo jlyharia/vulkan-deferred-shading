@@ -1,6 +1,8 @@
 #include "GeometryPass.hpp"
 
+#include "PassUtils.hpp"
 #include "common/Config.hpp"
+#include "vulkan/VulkanUtils.hpp"
 #include "common/PushConstantConstant.hpp"
 #include "scene/Mesh.hpp"
 #include "vulkan/GBuffer.hpp"
@@ -19,26 +21,18 @@ void GeometryPass::execute(vk::CommandBuffer cmd,
     auto extent = swapChain_.getExtent();
     const vk::PipelineLayout layout = pipeline.getPipelineLayout();
 
-    std::array<vk::RenderingAttachmentInfo, 2> colorAttachments;
-    colorAttachments[0] = vk::RenderingAttachmentInfo()
-        .setImageView(gbuffer_.getAlbedoMetallicView())
-        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}));
-    colorAttachments[1] = vk::RenderingAttachmentInfo()
-        .setImageView(gbuffer_.getNormalRoughnessView())
-        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setClearValue(vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}));
+    const vk::ClearColorValue zeroClear(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+    std::array<vk::RenderingAttachmentInfo, 2> colorAttachments = {
+        pass_util::colorAttachment(gbuffer_.getAlbedoMetallicView(),  vk::AttachmentLoadOp::eClear, zeroClear),
+        pass_util::colorAttachment(gbuffer_.getNormalRoughnessView(), vk::AttachmentLoadOp::eClear, zeroClear),
+    };
 
-    auto depthAttachment = vk::RenderingAttachmentInfo()
-        .setImageView(swapChain_.getDepthImageView())
-        .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setClearValue(vk::ClearDepthStencilValue(1.0f, 0));
+    auto depthAttachment = pass_util::depthAttachment(
+        swapChain_.getDepthImageView(),
+        vk::ImageLayout::eDepthStencilAttachmentOptimal,
+        vk::AttachmentLoadOp::eClear,
+        vk::AttachmentStoreOp::eStore,
+        vk::ClearDepthStencilValue(1.0f, 0));
 
     vk::RenderingInfo renderingInfo{};
     renderingInfo.setRenderArea({{0, 0}, extent})
@@ -48,11 +42,7 @@ void GeometryPass::execute(vk::CommandBuffer cmd,
 
     cmd.beginRendering(renderingInfo);
     {
-        cmd.setViewport(0, vk::Viewport(0.0f, 0.0f,
-                                        static_cast<float>(extent.width),
-                                        static_cast<float>(extent.height),
-                                        0.0f, 1.0f));
-        cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+        pass_util::setViewportScissor(cmd, extent);
 
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                layout, DescriptorSets::GLOBAL_SET,
@@ -60,6 +50,8 @@ void GeometryPass::execute(vk::CommandBuffer cmd,
 
         cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getGBufferPipeline());
 
+        // Per-mesh draw loop (intentional mirror of ForwardPass — see ForwardPass.cpp).
+        // GeometryPass skips unlit materials; ForwardPass handles pipeline switching per-submesh.
         for (const auto &[mesh, transform, name, color] : meshInstances) {
             if (!mesh) continue;
             if (sphereMesh && mesh == sphereMesh) continue;
@@ -99,37 +91,10 @@ void GeometryPass::execute(vk::CommandBuffer cmd,
     cmd.endRendering();
 
     // Pipeline barrier: G-buffer color attachments + depth → shader-read for lighting pass
-    auto makeColorBarrier = [](vk::Image image) {
-        return vk::ImageMemoryBarrier2()
-            .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)
-            .setSrcAccessMask(vk::AccessFlagBits2::eColorAttachmentWrite)
-            .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
-            .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
-            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(image)
-            .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
-    };
-
     std::array<vk::ImageMemoryBarrier2, 3> barriers = {
-        makeColorBarrier(gbuffer_.getAlbedoMetallicImage()),
-        makeColorBarrier(gbuffer_.getNormalRoughnessImage()),
-        vk::ImageMemoryBarrier2()
-            .setSrcStageMask(vk::PipelineStageFlagBits2::eLateFragmentTests)
-            .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
-            .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
-            .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-            .setNewLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(swapChain_.getDepthImage())
-            .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}),
+        vk_util::colorAttachmentToShaderRead(gbuffer_.getAlbedoMetallicImage()),
+        vk_util::colorAttachmentToShaderRead(gbuffer_.getNormalRoughnessImage()),
+        vk_util::depthToShaderRead(swapChain_.getDepthImage()),
     };
-
-    vk::DependencyInfo depInfo;
-    depInfo.setImageMemoryBarriers(barriers);
-    cmd.pipelineBarrier2(depInfo);
+    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
 }

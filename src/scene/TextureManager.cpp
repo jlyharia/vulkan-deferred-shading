@@ -146,33 +146,12 @@ std::shared_ptr<Texture> TextureManager::createSinglePixelTexture(uint32_t pixel
     tex->format = format;
     tex->mipLevels = 1;
 
-    vk::DeviceSize size = 4;
-    vk::Buffer staging;
-    VmaAllocation stagingAlloc;
-    vk_util::createBuffer(context_.getVmaAllocator(), size, vk::BufferUsageFlagBits::eTransferSrc,
-                          VMA_MEMORY_USAGE_CPU_ONLY, staging, stagingAlloc);
-
-    void *data;
-    vmaMapMemory(context_.getVmaAllocator(), stagingAlloc, &data);
-    memcpy(data, &pixelData, 4);
-    vmaUnmapMemory(context_.getVmaAllocator(), stagingAlloc);
-
-    vk_util::createImage(context_.getVmaAllocator(), 1, 1, format, vk::ImageTiling::eOptimal,
-                         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-                         VMA_MEMORY_USAGE_GPU_ONLY, tex->image, tex->allocation);
-
-    vk_util::transitionImageLayout(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-                                   tex->image, format, vk::ImageLayout::eUndefined,
-                                   vk::ImageLayout::eTransferDstOptimal);
-
-    vk_util::copyBufferToImage(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-                               staging, tex->image, 1, 1);
-
-    vk_util::transitionImageLayout(context_.getDevice(), context_.getTransferCommandPool(), context_.getGraphicsQueue(),
-                                   tex->image, format, vk::ImageLayout::eTransferDstOptimal,
-                                   vk::ImageLayout::eShaderReadOnlyOptimal);
-
-    vmaDestroyBuffer(context_.getVmaAllocator(), staging, stagingAlloc);
+    vk_util::uploadToDeviceImage(
+        context_.getVmaAllocator(), context_.getDevice(),
+        context_.getTransferCommandPool(), context_.getGraphicsQueue(),
+        &pixelData, sizeof(pixelData),
+        1, 1, format,
+        tex->image, tex->allocation);
     tex->imageView = vk_util::createImageView(context_.getDevice(), tex->image, format);
     return tex;
 }
