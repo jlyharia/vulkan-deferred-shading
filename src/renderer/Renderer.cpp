@@ -21,7 +21,6 @@
 #include "vulkan/SwapChain.hpp"
 #include "vulkan/GBuffer.hpp"
 #include "vulkan/VulkanUtils.hpp"
-#include "renderer/passes/ForwardPass.hpp"
 #include "renderer/passes/GeometryPass.hpp"
 #include "renderer/passes/LightingPass.hpp"
 #include "renderer/passes/OverlayPass.hpp"
@@ -148,7 +147,6 @@ void Renderer::initResources() {
     createGBufferDescriptorSets();
 
     // Render passes (GBuffer must exist before GeometryPass is constructed)
-    forwardPass_ = std::make_unique<ForwardPass>(swapChain_);
     geometryPass_ = std::make_unique<GeometryPass>(swapChain_, *gbuffer_);
     ssaoPass_ = std::make_unique<SsaoPass>(swapChain_, context_);
     createSsaoDescriptorSets();
@@ -182,13 +180,16 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
     {
         prepareFrameImages(cmd, imageIndex);
 
-        if (renderPath_ == RenderPath::Deferred) {
-            renderDeferred(cmd, graphicsPipeline, imageIndex, meshInstances, instanceCount);
-        } else {
-            forwardPass_->execute(cmd, graphicsPipeline, imageIndex,
-                                  descriptorSets_[currentFrame], meshInstances, instanceCount,
-                                  defaultMaterial, sphereMesh_);
-        }
+        geometryPass_->execute(cmd, graphicsPipeline, descriptorSets_[currentFrame],
+                               meshInstances, defaultMaterial, sphereMesh_);
+        ssaoPass_->execute(cmd, graphicsPipeline,
+                           descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame],
+                           ssaoBufferDescriptorSet_);
+        ssaoBlurPass_->execute(cmd, graphicsPipeline, ssaoBlurDescriptorSet_);
+        lightingPass_->execute(cmd, graphicsPipeline, imageIndex,
+                               descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame]);
+        overlayPass_->execute(cmd, graphicsPipeline, imageIndex,
+                              descriptorSets_[currentFrame], sphereMesh_, instanceCount);
 
         // UI pass (ImGui handles its own begin/endRendering)
         userInterface.recordCommands(cmd, imageIndex);
@@ -196,27 +197,6 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
         finalizeFrameImages(cmd, imageIndex);
     }
     cmd.end();
-}
-
-// =============================================================================
-// Deferred Rendering
-// =============================================================================
-
-void Renderer::renderDeferred(vk::CommandBuffer cmd,
-                              const GraphicsPipeline &graphicsPipeline,
-                              uint32_t imageIndex,
-                              const std::vector<MeshInstance> &meshInstances,
-                              uint32_t instanceCount) const {
-    geometryPass_->execute(cmd, graphicsPipeline, descriptorSets_[currentFrame],
-                           meshInstances, defaultMaterial, sphereMesh_);
-    ssaoPass_->execute(cmd, graphicsPipeline,
-                       descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame],
-                       ssaoBufferDescriptorSet_);
-    ssaoBlurPass_->execute(cmd, graphicsPipeline, ssaoBlurDescriptorSet_);
-    lightingPass_->execute(cmd, graphicsPipeline, imageIndex,
-                           descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame]);
-    overlayPass_->execute(cmd, graphicsPipeline, imageIndex,
-                          descriptorSets_[currentFrame], sphereMesh_, instanceCount);
 }
 
 void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {
@@ -237,23 +217,15 @@ void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) co
                                                  .setImage(swapChain_.getDepthImage())
                                                  .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
 
-    if (renderPath_ == RenderPath::Deferred) {
-        std::array<vk::ImageMemoryBarrier2, 6> barriers = {
-            vk_util::undefinedToColorAttachment(swapChain_.getImages()[imageIndex]),
-            depthBarrier,
-            vk_util::undefinedToColorAttachment(gbuffer_->getAlbedoMetallicImage()),
-            vk_util::undefinedToColorAttachment(gbuffer_->getNormalRoughnessImage()),
-            vk_util::undefinedToColorAttachment(ssaoPass_->getSsaoBufferImage()),
-            vk_util::undefinedToColorAttachment(ssaoBlurPass_->getBlurredImage()),
-        };
-        cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
-    } else {
-        std::array<vk::ImageMemoryBarrier2, 2> barriers = {
-            vk_util::undefinedToColorAttachment(swapChain_.getImages()[imageIndex]),
-            depthBarrier,
-        };
-        cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
-    }
+    std::array<vk::ImageMemoryBarrier2, 6> barriers = {
+        vk_util::undefinedToColorAttachment(swapChain_.getImages()[imageIndex]),
+        depthBarrier,
+        vk_util::undefinedToColorAttachment(gbuffer_->getAlbedoMetallicImage()),
+        vk_util::undefinedToColorAttachment(gbuffer_->getNormalRoughnessImage()),
+        vk_util::undefinedToColorAttachment(ssaoPass_->getSsaoBufferImage()),
+        vk_util::undefinedToColorAttachment(ssaoBlurPass_->getBlurredImage()),
+    };
+    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
 }
 
 void Renderer::finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const {

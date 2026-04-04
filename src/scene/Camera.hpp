@@ -37,7 +37,8 @@ public:
 
     // Returns the view matrix for the UBO
     [[nodiscard]] glm::mat4 getViewMatrix() const {
-        return glm::lookAt(position, position + forward, up);
+
+        return glm::lookAtRH(position, position + forward, up);
     }
 
     // Returns the projection matrix for the UBO

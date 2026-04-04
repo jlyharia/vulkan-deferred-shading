@@ -80,8 +80,6 @@ add_executable(${TARGET_NAME}
         src/vulkan/VulkanUtils.hpp
         src/assets/AssetManager.cpp
         src/assets/AssetManager.hpp
-        src/renderer/passes/ForwardPass.cpp
-        src/renderer/passes/ForwardPass.hpp
         src/renderer/passes/GeometryPass.cpp
         src/renderer/passes/GeometryPass.hpp
         src/renderer/passes/LightingPass.cpp
