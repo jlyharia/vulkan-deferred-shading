@@ -52,14 +52,10 @@ You're under-invested in things that matter more:
 ## Todo
 1. Delete vulkan resources per frame.
 2. Move vulkan resource destroy into queue.
-   PBR Shader	Hard	Adds realistic metal, roughness, and light math.
-   Shadow Maps	Very Hard	Adds actual shadows cast by the arches onto the floor.
 3. horizontal grid plan
 4. - ~~Nsight to analyze frame time and gpu usage~~ 
    -   RenderDoc is enough for your portfolio work. Learn Nsight after you land the role.
-
-- 1. SSAO — visible feature, teaches screen-space techniques 
-- Shadow maps — interview staple, tests projection math
+- Shadow maps — direction light - interview staple, tests projection math 
 - Being able to explain bandwidth/ALU tradeoffs verbally — more valuable than any tool
 - Reverse Z + infinite far plane — a classic optimization that shows you understand depth precision
 - Tiled deferred/Clustered deferred
@@ -78,39 +74,23 @@ You're under-invested in things that matter more:
       Clustered is better but 3× the implementation work. Do tiled first. If you finish tiled and want to differentiate further, clustered is the upgrade.
   
     ```
-# What I have done
+# What I have done & learn
 - Vulkan 1.3
+- Vulkan CPP wrapper
 - Dynamic Rendering 
-- ImGui 
-- Gltf 
-- Mipmapping 
-- Normal Mapping 
+- Add simple UI by ImGui 
+- load model by modern industrial standard Gltf 
+- Mipmapping
 - add 24 spheres object to indicate point light and using ssbo to reduce attribute count in shader
 - pbr without image based lighting
-- Defer shading with: Depth reconstruction
+- Defer shading
+- Reconstruct position from depth buffer to reduce bandwidth from removing gbuffer position texture
 - Render Doc to analyze gbuffer texture
 - Nsight to analyze frame time and gpu usage
+- SSAO with SSAO blur
+- shadow map with one direction light
+- Use renderdoc to check each shader's input and output texture
 
-
-七、給你一個實戰任務（面試加分）
-
-試做兩個版本：
-
-G-buffer 存 position
-
-用 depth reconstruct
-
-然後：
-
-用 RenderDoc 看 bandwidth
-
-比較 memory usage
-
-測 frame time
-
-這種「實測」會讓你在面試非常有說服力。
-
-如果你願意，我下一步可以帶你深入一個更硬核問題：
 
 👉 為什麼 depth 是 non-linear？
 👉 或怎麼做 reversed Z + infinite far plane？

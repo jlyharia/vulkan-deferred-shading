@@ -23,7 +23,6 @@ class GraphicsPipeline;
 class GBuffer;
 class SwapChain;
 class VulkanContext;
-struct ForwardPass;
 struct GeometryPass;
 struct LightingPass;
 struct OverlayPass;
@@ -62,8 +61,6 @@ public:
     [[nodiscard]] vk::DescriptorSetLayout getSsaoBlurLayout() const { return ssaoBlurLayout_; }
 
     [[nodiscard]] GBuffer &getGBuffer() const { return *gbuffer_; }
-    [[nodiscard]] RenderPath getRenderPath() const { return renderPath_; }
-    void setRenderPath(RenderPath path) { renderPath_ = path; }
 
     vk::DescriptorSet createTextureDescriptorSet(
         vk::ImageView imageView,
@@ -88,12 +85,6 @@ private:
                              const UserInterface &userInterface,
                              const std::vector<MeshInstance> &meshInstances,
                              uint32_t instanceCount) const;
-    // Deferred rendering orchestration
-    void renderDeferred(vk::CommandBuffer cmd,
-                        const GraphicsPipeline &graphicsPipeline,
-                        uint32_t imageIndex,
-                        const std::vector<MeshInstance> &meshInstances,
-                        uint32_t instanceCount) const;
     void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
     void finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
 
@@ -148,7 +139,6 @@ private:
     vk::DescriptorSetLayout textureLayout_;
 
     // Deferred shading resources
-    RenderPath renderPath_ = RenderPath::Deferred;
     std::unique_ptr<GBuffer> gbuffer_;
     vk::DescriptorSetLayout gbufferLayout_;
     std::vector<vk::DescriptorSet> gbufferDescriptorSets_; // one per frame-in-flight
@@ -161,7 +151,6 @@ private:
     vk::DescriptorSet ssaoBlurDescriptorSet_;
     vk::Sampler ssaoNoiseSampler_;
     // Render passes (initialized in initResources, after GBuffer is ready)
-    std::unique_ptr<ForwardPass> forwardPass_;
     std::unique_ptr<GeometryPass> geometryPass_;
     std::unique_ptr<SsaoPass> ssaoPass_;
     std::unique_ptr<SsaoBlurPass> ssaoBlurPass_;
