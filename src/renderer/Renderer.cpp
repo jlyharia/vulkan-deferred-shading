@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cassert>
 #include <chrono>
 #include <cstring>
 
@@ -21,9 +22,11 @@
 #include "vulkan/SwapChain.hpp"
 #include "vulkan/GBuffer.hpp"
 #include "vulkan/VulkanUtils.hpp"
+#include "renderer/passes/DirShadowPass.hpp"
 #include "renderer/passes/GeometryPass.hpp"
 #include "renderer/passes/LightingPass.hpp"
 #include "renderer/passes/OverlayPass.hpp"
+#include "vulkan/ShadowMap.hpp"
 
 
 // The C++ Bindings Header
@@ -65,6 +68,8 @@ Renderer::~Renderer() {
     vkDeviceWaitIdle(context_.getDevice());
 
     // Destroy pass resources before pool (sets are freed when pool is destroyed)
+    dirShadowPass_.reset();
+    shadowMap_.reset();
     ssaoBlurPass_.reset();
     ssaoPass_.reset();
     gbuffer_.reset();
@@ -84,9 +89,9 @@ Renderer::~Renderer() {
         context_.getDevice().destroySampler(nearestClampSampler_);
         nearestClampSampler_ = nullptr;
     }
-    if (gbufferLayout_) {
-        vkDestroyDescriptorSetLayout(context_.getDevice(), gbufferLayout_, nullptr);
-        gbufferLayout_ = nullptr;
+    if (lightingInputsLayout_) {
+        vkDestroyDescriptorSetLayout(context_.getDevice(), lightingInputsLayout_, nullptr);
+        lightingInputsLayout_ = nullptr;
     }
 
     vkDestroyDescriptorPool(context_.getDevice(), descriptorPool_, nullptr);
@@ -141,12 +146,16 @@ void Renderer::initResources() {
     createDescriptorPool();
     createDescriptorSets();
 
+    // Shadow map: fixed resolution, independent of swapchain
+    shadowMap_ = std::make_unique<ShadowMap>(context_, 2048, 2048);
+
     // G-buffer: sized to match swapchain extent
     auto extent = swapChain_.getExtent();
     gbuffer_ = std::make_unique<GBuffer>(context_, extent.width, extent.height);
-    createGBufferDescriptorSets();
+    createLightingInputsDescSets(); // includes shadow map at binding 4
 
     // Render passes (GBuffer must exist before GeometryPass is constructed)
+    dirShadowPass_ = std::make_unique<DirShadowPass>(*shadowMap_);
     geometryPass_ = std::make_unique<GeometryPass>(swapChain_, *gbuffer_);
     ssaoPass_ = std::make_unique<SsaoPass>(swapChain_, context_);
     createSsaoDescriptorSets();
@@ -174,20 +183,23 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
                                    const uint32_t imageIndex,
                                    const UserInterface &userInterface,
                                    const std::vector<MeshInstance> &meshInstances,
-                                   const uint32_t instanceCount) const {
+                                   const uint32_t instanceCount,
+                                   const DirLightView &dirLight) const {
     auto beginInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     cmd.begin(beginInfo);
     {
         prepareFrameImages(cmd, imageIndex);
 
+        dirShadowPass_->execute(cmd, graphicsPipeline, meshInstances, dirLight);
+
         geometryPass_->execute(cmd, graphicsPipeline, descriptorSets_[currentFrame],
                                meshInstances, defaultMaterial, sphereMesh_);
         ssaoPass_->execute(cmd, graphicsPipeline,
-                           descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame],
+                           descriptorSets_[currentFrame], lightingInputsDescSets_[currentFrame],
                            ssaoBufferDescriptorSet_);
         ssaoBlurPass_->execute(cmd, graphicsPipeline, ssaoBlurDescriptorSet_);
         lightingPass_->execute(cmd, graphicsPipeline, imageIndex,
-                               descriptorSets_[currentFrame], gbufferDescriptorSets_[currentFrame]);
+                               descriptorSets_[currentFrame], lightingInputsDescSets_[currentFrame]);
         overlayPass_->execute(cmd, graphicsPipeline, imageIndex,
                               descriptorSets_[currentFrame], sphereMesh_, instanceCount);
 
@@ -266,7 +278,8 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
                          const Camera &camera,
                          const UserInterface &userInterface,
                          const std::vector<MeshInstance> &meshInstances,
-                         const std::vector<PointLight> &pointLights) {
+                         const std::vector<PointLight> &pointLights,
+                         const DirLightView &dirLight) {
     auto device = context_.getDevice();
 
     // 1. Wait for the Frame Slot to be free (CPU-GPU Sync)
@@ -296,12 +309,12 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
     // 4. Reset Fence and Record Commands
     device.resetFences(inFlightFences_[currentFrame]);
 
-    updateUniformBuffer(currentFrame, camera, pointLights);
+    updateUniformBuffer(currentFrame, camera, pointLights, dirLight);
     const uint32_t instanceCount = updateInstanceBuffer(currentFrame, meshInstances);
 
     commandBuffers_[currentFrame].reset();
     recordCommandBuffer(commandBuffers_[currentFrame], graphicsPipeline, imageIndex, userInterface, meshInstances,
-                        instanceCount);
+                        instanceCount, dirLight);
 
     // 5. Submit Info (Modern C++ Style)
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
@@ -357,7 +370,7 @@ void Renderer::recreateSwapChain() {
     if (gbuffer_) {
         auto extent = swapChain_.getExtent();
         gbuffer_->recreate(extent.width, extent.height);
-        updateGBufferDescriptorSets();
+        updateLightingInputsDescSets();
     }
 
     // 5. Recreate extent-sized SSAO/blur images and re-point their descriptor sets.
@@ -392,8 +405,9 @@ void Renderer::createUniformBuffers() {
     }
 }
 
+static constexpr uint32_t MAX_INSTANCES = 64;
+
 void Renderer::createInstanceBuffers() {
-    constexpr uint32_t MAX_INSTANCES = 64;
     const vk::DeviceSize bufferSize = MAX_INSTANCES * sizeof(InstanceData);
 
     instanceBuffers_.resize(engineConfig::MAX_FRAMES_IN_FLIGHT);
@@ -422,6 +436,8 @@ uint32_t Renderer::updateInstanceBuffer(const uint32_t currentFrame,
             instances.push_back({transform.modelMatrix, color});
     }
 
+    assert(instances.size() <= MAX_INSTANCES && "sphere instance count exceeds SSBO capacity");
+
     if (!instances.empty()) {
         std::memcpy(instanceBuffersMapped_[currentFrame], instances.data(),
                     instances.size() * sizeof(InstanceData));
@@ -432,13 +448,16 @@ uint32_t Renderer::updateInstanceBuffer(const uint32_t currentFrame,
 
 
 void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera,
-                                   const std::vector<PointLight> &pointLights) const {
+                                   const std::vector<PointLight> &pointLights,
+                                   const DirLightView &dirLight) const {
     GlobalUBO ubo{};
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
     ubo.invView = glm::inverse(ubo.view);
     ubo.invProj = glm::inverse(ubo.proj);
-    ubo.cameraPos = glm::vec4(camera.position, 0.0f);
+    ubo.cameraPos           = glm::vec4(camera.position, 0.0f);
+    ubo.dirLightSpaceMatrix = dirLight.lightSpaceMatrix();
+    ubo.dirLightDir         = glm::vec4(glm::normalize(dirLight.target - dirLight.position), 0.0f);
 
     const size_t count = std::min(pointLights.size(), size_t{24});
     for (size_t i = 0; i < count; ++i)
@@ -458,11 +477,11 @@ void Renderer::createDescriptorPool() {
                                   .setType(vk::DescriptorType::eStorageBuffer)
                                   .setDescriptorCount(static_cast<uint32_t>(engineConfig::MAX_FRAMES_IN_FLIGHT));
 
-    // Pool Size 3: For the Texture Samplers (Set 1) + G-buffer samplers (Set 2)
-    // Sponza has ~80 materials; G-buffer adds 3 per frame-in-flight
+    // Pool Size 3: For the Texture Samplers (Set 1) + G-buffer samplers (Set 2) + shadow map (binding 4)
+    // Sponza has ~80 materials; G-buffer adds 4 per frame-in-flight; shadow map adds 1 per frame-in-flight
     constexpr auto samplerPoolSize = vk::DescriptorPoolSize()
                                      .setType(vk::DescriptorType::eCombinedImageSampler)
-                                     .setDescriptorCount(200 + 4 * engineConfig::MAX_FRAMES_IN_FLIGHT + 1 + 2);
+                                     .setDescriptorCount(200 + 5 * engineConfig::MAX_FRAMES_IN_FLIGHT + 1 + 2);
 
     std::array<vk::DescriptorPoolSize, 3> poolSizes = {uboPoolSize, ssboPoolSize, samplerPoolSize};
     auto poolInfo = vk::DescriptorPoolCreateInfo()
@@ -512,18 +531,18 @@ void Renderer::createDescriptorSets() {
     }
 }
 
-void Renderer::createGBufferDescriptorSets() {
+void Renderer::createLightingInputsDescSets() {
     // Allocate one G-buffer descriptor set per frame-in-flight
-    std::vector<vk::DescriptorSetLayout> layouts(engineConfig::MAX_FRAMES_IN_FLIGHT, gbufferLayout_);
+    std::vector<vk::DescriptorSetLayout> layouts(engineConfig::MAX_FRAMES_IN_FLIGHT, lightingInputsLayout_);
     auto allocInfo = vk::DescriptorSetAllocateInfo()
                      .setDescriptorPool(descriptorPool_)
                      .setSetLayouts(layouts);
-    gbufferDescriptorSets_ = context_.getDevice().allocateDescriptorSets(allocInfo);
+    lightingInputsDescSets_ = context_.getDevice().allocateDescriptorSets(allocInfo);
 
-    updateGBufferDescriptorSets();
+    updateLightingInputsDescSets();
 }
 
-void Renderer::updateGBufferDescriptorSets() {
+void Renderer::updateLightingInputsDescSets() {
     for (size_t i = 0; i < engineConfig::MAX_FRAMES_IN_FLIGHT; i++) {
         auto albedoInfo = vk::DescriptorImageInfo()
                           .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
@@ -538,10 +557,16 @@ void Renderer::updateGBufferDescriptorSets() {
                           .setImageView(swapChain_.getDepthImageView())
                           .setSampler(nearestClampSampler_);
 
-        std::array<vk::WriteDescriptorSet, 3> writes = {
-            vk_util::imageSamplerWrite(gbufferDescriptorSets_[i], 0, albedoInfo),
-            vk_util::imageSamplerWrite(gbufferDescriptorSets_[i], 1, normalInfo),
-            vk_util::imageSamplerWrite(gbufferDescriptorSets_[i], 2, depthInfo),
+        auto shadowInfo = vk::DescriptorImageInfo()
+                          .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                          .setImageView(shadowMap_->getDepthView())
+                          .setSampler(shadowMap_->getSampler());
+
+        std::array<vk::WriteDescriptorSet, 4> writes = {
+            vk_util::imageSamplerWrite(lightingInputsDescSets_[i], 0, albedoInfo),
+            vk_util::imageSamplerWrite(lightingInputsDescSets_[i], 1, normalInfo),
+            vk_util::imageSamplerWrite(lightingInputsDescSets_[i], 2, depthInfo),
+            vk_util::imageSamplerWrite(lightingInputsDescSets_[i], 4, shadowInfo),
         };
         context_.getDevice().updateDescriptorSets(writes, nullptr);
     }
@@ -617,7 +642,7 @@ void Renderer::updateSsaoBlurDescriptorSet() {
                            .setImageView(ssaoBlurPass_->getBlurredImageView())
                            .setSampler(nearestClampSampler_);
 
-        auto write = vk_util::imageSamplerWrite(gbufferDescriptorSets_[i], 3, blurredInfo);
+        auto write = vk_util::imageSamplerWrite(lightingInputsDescSets_[i], 3, blurredInfo);
         context_.getDevice().updateDescriptorSets(write, nullptr);
     }
 }
@@ -706,7 +731,7 @@ void Renderer::createDescriptorSetLayout() {
 
     // --- [SET 2]: G-BUFFER INPUTS (deferred lighting pass) ---
     {
-        std::array<vk::DescriptorSetLayoutBinding, 4> gbufferBindings = {
+        std::array<vk::DescriptorSetLayoutBinding, 5> gbufferBindings = {
             // Binding 0: Albedo + Metallic
             vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
@@ -716,13 +741,16 @@ void Renderer::createDescriptorSetLayout() {
             // Binding 2: Depth (for world-position reconstruction)
             vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
-            // Binding 4: Ssao buffer TODO should be ssao blur buffer once it is used
+            // Binding 3: SSAO blurred result
             vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eCombinedImageSampler, 1,
+                                           vk::ShaderStageFlagBits::eFragment),
+            // Binding 4: Directional shadow map
+            vk::DescriptorSetLayoutBinding(4, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
         };
 
         vk::DescriptorSetLayoutCreateInfo gbufferInfo({}, gbufferBindings);
-        gbufferLayout_ = device.createDescriptorSetLayout(gbufferInfo);
+        lightingInputsLayout_ = device.createDescriptorSetLayout(gbufferInfo);
     }
 
     // --- [SET 3]: SSAO INPUTS (ssao pass) ---

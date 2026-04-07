@@ -29,28 +29,22 @@ GraphicsPipeline::GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
 
     createPipelineLayout(descriptorSetLayouts);
     createSsaoBlurPipelineLayout(ssaoBlurLayout);
+    createDirShadowPipelineLayout();
 
     vk::Format swapFormat = swapChain_.getColorFormat();
-
-    // --- Forward rendering pipelines (single color attachment) ---
-    pbrPipeline_ = buildPipeline({
-        .vertSpv = "shaders/pbr/pbr.vert.spv",
-        .fragSpv = "shaders/pbr/pbr.frag.spv",
-        .colorFormats = {swapFormat},
-    });
 
     unlitPipeline_ = buildPipeline({
         .vertSpv = "shaders/unlit/unlit.vert.spv",
         .fragSpv = "shaders/unlit/unlit.frag.spv",
         .colorFormats = {swapFormat},
-    });
+    }, pipelineLayout_);
 
     // --- Deferred: G-buffer geometry pass (2 MRT color attachments + depth write) ---
     gbufferPipeline_ = buildPipeline({
         .vertSpv = "shaders/gbuffer/gbuffer.vert.spv",
         .fragSpv = "shaders/gbuffer/gbuffer.frag.spv",
         .colorFormats = {GBuffer::ALBEDO_METALLIC_FORMAT, GBuffer::NORMAL_ROUGHNESS_FORMAT},
-    });
+    }, pipelineLayout_);
 
     // --- Deferred: lighting pass (fullscreen triangle, no vertex input, no depth) ---
     lightingPipeline_ = buildPipeline({
@@ -60,8 +54,8 @@ GraphicsPipeline::GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
         .hasVertexInput = false,
         .depthTestEnable = false,
         .depthWriteEnable = false,
-        .cullMode = vk::CullModeFlagBits::eNone, // fullscreen triangle — no culling
-    });
+        .cullMode = vk::CullModeFlagBits::eNone,
+    }, pipelineLayout_);
 
     // --- Deferred: forward overlay (light spheres — depth test ON, depth write OFF) ---
     overlayUnlitPipeline_ = buildPipeline({
@@ -70,7 +64,7 @@ GraphicsPipeline::GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
         .colorFormats = {swapFormat},
         .depthTestEnable = true,
         .depthWriteEnable = false,
-    });
+    }, pipelineLayout_);
 
     ssaoPipeline_ = buildPipeline({
         .vertSpv = "shaders/ssao/ssao.vert.spv",
@@ -80,7 +74,7 @@ GraphicsPipeline::GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
         .depthTestEnable = false,
         .depthWriteEnable = false,
         .cullMode = vk::CullModeFlagBits::eNone,
-    });
+    }, pipelineLayout_);
 
     ssaoBlurPipeline_ = buildPipeline({
         .vertSpv = "shaders/ssaoblur/ssaoblur.vert.spv",
@@ -91,32 +85,43 @@ GraphicsPipeline::GraphicsPipeline(VulkanContext &context, SwapChain &swapChain,
         .depthWriteEnable = false,
         .cullMode = vk::CullModeFlagBits::eNone,
     }, ssaoBlurPipelineLayout_);
+
+    // --- Shadow: depth-only from light's perspective (no color attachment, front-face culling) ---
+    dirShadowPipeline_ = buildPipeline({
+        .vertSpv = "shaders/shadow/dirShadow.vert.spv",
+        .colorFormats = {},
+        .depthTestEnable = true,
+        .depthWriteEnable = true,
+        .depthBiasEnable = true,  // dynamic — set via cmd.setDepthBias() in DirShadowPass
+        .cullMode = vk::CullModeFlagBits::eFront,
+    }, dirShadowPipelineLayout_);
 }
 
 GraphicsPipeline::~GraphicsPipeline() {
     auto device = context_.getDevice();
-    device.destroyPipeline(pbrPipeline_);
     device.destroyPipeline(unlitPipeline_);
     device.destroyPipeline(gbufferPipeline_);
     device.destroyPipeline(lightingPipeline_);
     device.destroyPipeline(overlayUnlitPipeline_);
     device.destroyPipeline(ssaoPipeline_);
     device.destroyPipeline(ssaoBlurPipeline_);
+    device.destroyPipeline(dirShadowPipeline_);
+    device.destroyPipelineLayout(dirShadowPipelineLayout_);
     device.destroyPipelineLayout(ssaoBlurPipelineLayout_);
     device.destroyPipelineLayout(pipelineLayout_);
 }
 
 vk::Pipeline GraphicsPipeline::buildPipeline(const PipelineConfig &config,
                                              vk::PipelineLayout layout) const {
-    auto vertShaderCode = readFile(config.vertSpv);
-    auto fragShaderCode = readFile(config.fragSpv);
+    vk::ShaderModule vertShaderModule = createShaderModule(readFile(config.vertSpv));
 
-    vk::ShaderModule vertShaderModule = createShaderModule(vertShaderCode);
-    vk::ShaderModule fragShaderModule = createShaderModule(fragShaderCode);
-
-    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {
-        vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eVertex,   vertShaderModule, "main"),
-        vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eFragment, fragShaderModule, "main")};
+    vk::ShaderModule fragShaderModule{};
+    std::vector<vk::PipelineShaderStageCreateInfo> shaderStages;
+    shaderStages.push_back({{}, vk::ShaderStageFlagBits::eVertex, vertShaderModule, "main"});
+    if (!config.fragSpv.empty()) {
+        fragShaderModule = createShaderModule(readFile(config.fragSpv));
+        shaderStages.push_back({{}, vk::ShaderStageFlagBits::eFragment, fragShaderModule, "main"});
+    }
 
     // Vertex input — empty for fullscreen triangle passes
     auto bindingDescription    = Vertex::getBindingDescription();
@@ -141,7 +146,7 @@ vk::Pipeline GraphicsPipeline::buildPipeline(const PipelineConfig &config,
                       .setLineWidth(1.0f)
                       .setCullMode(config.cullMode)
                       .setFrontFace(vk::FrontFace::eCounterClockwise)
-                      .setDepthBiasEnable(false);
+                      .setDepthBiasEnable(config.depthBiasEnable);
 
     auto multisampling = vk::PipelineMultisampleStateCreateInfo()
                          .setSampleShadingEnable(false)
@@ -173,7 +178,9 @@ vk::Pipeline GraphicsPipeline::buildPipeline(const PipelineConfig &config,
         pipelineRenderingInfo.setDepthAttachmentFormat(config.depthFormat);
     }
 
-    std::array<vk::DynamicState, 2> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+    std::vector<vk::DynamicState> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+    if (config.depthBiasEnable)
+        dynamicStates.push_back(vk::DynamicState::eDepthBias);
     auto dynamicStateInfo = vk::PipelineDynamicStateCreateInfo({}, dynamicStates);
 
     auto pipelineInfo = vk::GraphicsPipelineCreateInfo()
@@ -187,13 +194,13 @@ vk::Pipeline GraphicsPipeline::buildPipeline(const PipelineConfig &config,
                         .setPDepthStencilState(&depthStencil)
                         .setPColorBlendState(&colorBlending)
                         .setPDynamicState(&dynamicStateInfo)
-                        .setLayout(layout ? layout : pipelineLayout_);
+                        .setLayout(layout);
 
     auto result = context_.getDevice().createGraphicsPipeline(nullptr, pipelineInfo);
     if (result.result != vk::Result::eSuccess)
         throw std::runtime_error("failed to create graphics pipeline: " + config.vertSpv);
 
-    context_.getDevice().destroyShaderModule(fragShaderModule);
+    if (fragShaderModule) context_.getDevice().destroyShaderModule(fragShaderModule);
     context_.getDevice().destroyShaderModule(vertShaderModule);
 
     return result.value;
@@ -224,4 +231,17 @@ void GraphicsPipeline::createSsaoBlurPipelineLayout(vk::DescriptorSetLayout blur
     // No push constants needed.
     const auto layoutInfo = vk::PipelineLayoutCreateInfo().setSetLayouts(blurLayout);
     ssaoBlurPipelineLayout_ = context_.getDevice().createPipelineLayout(layoutInfo);
+}
+
+void GraphicsPipeline::createDirShadowPipelineLayout() {
+    // Shadow pass: vertex-only push constants, no descriptor sets
+    auto pushConstantRange = vk::PushConstantRange()
+                             .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+                             .setOffset(0)
+                             .setSize(sizeof(DirShadowDataConstants));
+
+    const auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo()
+                                    .setPushConstantRanges(pushConstantRange);
+
+    dirShadowPipelineLayout_ = context_.getDevice().createPipelineLayout(pipelineLayoutInfo);
 }

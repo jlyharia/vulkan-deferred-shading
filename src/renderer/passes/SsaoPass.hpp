@@ -19,7 +19,7 @@ struct SsaoPass {
     explicit SsaoPass(SwapChain &swapChain, VulkanContext &context);
     ~SsaoPass();
     void execute(vk::CommandBuffer cmd, const GraphicsPipeline &pipeline, vk::DescriptorSet globalDescSet,
-                 vk::DescriptorSet gbufferDescSet, vk::DescriptorSet ssaoDescSet) const;
+                 vk::DescriptorSet lightingInputsDescSet, vk::DescriptorSet ssaoDescSet) const;
     [[nodiscard]] vk::ImageView getSsaoKernelBufferImageView() const { return ssaoBuffer_.view; }
     [[nodiscard]] vk::ImageView getSsaoNoiseImageView()        const { return ssaoNoiseImageView_; }
     [[nodiscard]] vk::Buffer    getKernelBuffer()              const { return kernelBuffer_; }

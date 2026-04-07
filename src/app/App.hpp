@@ -9,6 +9,7 @@
 
 #include "../scene/Camera.hpp"
 #include "assets/AssetManager.hpp"
+#include "scene/DirLightView.hpp"
 #include "scene/MeshInstance.hpp"
 #include "scene/TextureManager.hpp"
 #include "scene/PointLight.hpp"
@@ -52,6 +53,7 @@ private:
 
     // Point light data — positions derived from sphere MeshInstance transforms
     std::vector<PointLight> pointLights_;
+    DirLightView dirLight_;
 
     void initWindow();
 

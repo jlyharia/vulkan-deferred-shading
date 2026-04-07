@@ -4,6 +4,7 @@
 
 #include "AssetManager.hpp"
 #include "scene/Mesh.hpp"
+#include "vulkan/VulkanUtils.hpp"
 #include "scene/MeshUtils.hpp"
 #include "assets/GltfLoader.hpp"
 #include "vulkan/VulkanUtils.hpp"
@@ -39,7 +40,7 @@ std::shared_ptr<Mesh> AssetManager::loadModel(const std::string &path) {
         mat.normalTexture            = (info.normalIdx >= 0)            ? data.textures[info.normalIdx]            : textureManager_.getFlatNormalFallback();
         mat.metallicRoughnessTexture = (info.metallicRoughnessIdx >= 0) ? data.textures[info.metallicRoughnessIdx] : textureManager_.getBlackFallback();
 
-        mat.textureSet = renderer_.createTextureDescriptorSet(
+        mat.textureSet = allocateTextureSet(
             mat.albedoTexture->imageView,
             mat.normalTexture->imageView,
             mat.metallicRoughnessTexture->imageView,
@@ -66,7 +67,7 @@ std::shared_ptr<Mesh> AssetManager::getSharedSphere() {
     lightMat.albedoTexture            = textureManager_.getWhiteFallback();
     lightMat.normalTexture            = textureManager_.getFlatNormalFallback();
     lightMat.metallicRoughnessTexture = textureManager_.getBlackFallback();
-    lightMat.textureSet = renderer_.createTextureDescriptorSet(
+    lightMat.textureSet = allocateTextureSet(
         lightMat.albedoTexture->imageView,
         lightMat.normalTexture->imageView,
         lightMat.metallicRoughnessTexture->imageView,
@@ -135,4 +136,32 @@ void AssetManager::uploadMeshDataToGPU(std::shared_ptr<Mesh> mesh,
     // 6. Hand GPU handles to the Mesh
     mesh->setGpuResources(gpuVBuf, gpuVAlloc, gpuIBuf, gpuIAlloc,
                           static_cast<uint32_t>(indices.size()));
+}
+
+vk::DescriptorSet AssetManager::allocateTextureSet(vk::ImageView albedo,
+                                                    vk::ImageView normal,
+                                                    vk::ImageView metallicRoughness,
+                                                    vk::Sampler sampler) const {
+    const auto allocInfo = vk::DescriptorSetAllocateInfo()
+                           .setDescriptorPool(descriptorPool_)
+                           .setSetLayouts(textureLayout_);
+    const vk::DescriptorSet set = context_.getDevice().allocateDescriptorSets(allocInfo)[0];
+
+    const auto albedoInfo  = vk::DescriptorImageInfo()
+                             .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                             .setImageView(albedo).setSampler(sampler);
+    const auto normalInfo  = vk::DescriptorImageInfo()
+                             .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                             .setImageView(normal).setSampler(sampler);
+    const auto mrInfo      = vk::DescriptorImageInfo()
+                             .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                             .setImageView(metallicRoughness).setSampler(sampler);
+
+    std::array<vk::WriteDescriptorSet, 3> writes = {
+        vk_util::imageSamplerWrite(set, 0, albedoInfo),
+        vk_util::imageSamplerWrite(set, 1, normalInfo),
+        vk_util::imageSamplerWrite(set, 2, mrInfo),
+    };
+    context_.getDevice().updateDescriptorSets(writes, nullptr);
+    return set;
 }

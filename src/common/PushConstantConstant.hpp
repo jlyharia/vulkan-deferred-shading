@@ -10,4 +10,10 @@ struct MeshPushConstants {
     glm::vec4 baseColorFactor; // 16 bytes
 };
 
+
+struct DirShadowDataConstants {
+    glm::mat4 lightSpaceMatrix; // 64 bytes,  Projection * View
+    glm::mat4 model; // 16 bytes
+};
+
 // Total: 80 bytes (Vulkan minimum guarantee is 128 bytes)

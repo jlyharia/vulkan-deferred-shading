@@ -104,6 +104,11 @@ add_executable(${TARGET_NAME}
         src/renderer/passes/SsaoPass.hpp
         src/renderer/passes/SsaoBlurPass.cpp
         src/renderer/passes/SsaoBlurPass.hpp
+        src/renderer/passes/DirShadowPass.cpp
+        src/renderer/passes/DirShadowPass.hpp
+        src/scene/DirLightView.hpp
+        src/vulkan/ShadowMap.cpp
+        src/vulkan/ShadowMap.hpp
 )
 
 # ------------------------------------------------------------

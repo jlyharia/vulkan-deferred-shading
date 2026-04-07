@@ -12,27 +12,23 @@
 namespace vk_util {
 
 struct AttachmentImage {
-    vk::Image     image{};
+    vk::Image image{};
     vk::ImageView view{};
     VmaAllocation allocation{};
 
     [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(image); }
 
     static AttachmentImage create(
-        VmaAllocator         allocator,
-        vk::Device           device,
-        uint32_t             width,
-        uint32_t             height,
-        vk::Format           format,
-        vk::ImageUsageFlags  usage,
+        VmaAllocator allocator,
+        vk::Device device,
+        uint32_t width,
+        uint32_t height,
+        vk::Format format,
+        vk::ImageUsageFlags usage,
         vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor);
 
     void cleanup(vk::Device device, VmaAllocator allocator) noexcept;
 };
-
-} // namespace vk_util
-
-namespace vk_util {
 
 // 1. Generic Buffer Creation (VMA)
 void createBuffer(
@@ -112,6 +108,12 @@ vk::ImageView createImageView(
 // COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR (end-of-frame presentation transition)
 [[nodiscard]] vk::ImageMemoryBarrier2 colorAttachmentToPresent(vk::Image image) noexcept;
 
+// UNDEFINED → DEPTH_STENCIL_ATTACHMENT_OPTIMAL (frame-start for shadow map — contents discarded, cleared on load)
+[[nodiscard]] vk::ImageMemoryBarrier2 undefinedToDepthAttachment(vk::Image image) noexcept;
+
+// DEPTH_STENCIL_ATTACHMENT_OPTIMAL → SHADER_READ_ONLY_OPTIMAL (after shadow map write, for texture sampling)
+[[nodiscard]] vk::ImageMemoryBarrier2 depthAttachmentToShaderRead(vk::Image image) noexcept;
+
 // =============================================================================
 // Descriptor write helpers
 // =============================================================================
@@ -119,8 +121,8 @@ vk::ImageView createImageView(
 // Builds a WriteDescriptorSet for a combined-image-sampler binding.
 // The caller must keep imageInfo alive until device.updateDescriptorSets returns.
 [[nodiscard]] vk::WriteDescriptorSet imageSamplerWrite(
-    vk::DescriptorSet              set,
-    uint32_t                       binding,
+    vk::DescriptorSet set,
+    uint32_t binding,
     const vk::DescriptorImageInfo &imageInfo) noexcept;
 
 // =============================================================================
@@ -131,17 +133,17 @@ vk::ImageView createImageView(
 // Not suitable for mip-generating uploads (see TextureManager::getOrCreateTexture).
 // =============================================================================
 void uploadToDeviceImage(
-    VmaAllocator       allocator,
-    vk::Device         device,
-    vk::CommandPool    commandPool,
-    vk::Queue          queue,
-    const void        *data,
-    vk::DeviceSize     dataSize,
-    uint32_t           width,
-    uint32_t           height,
-    vk::Format         format,
-    vk::Image         &outImage,
-    VmaAllocation     &outAlloc);
+    VmaAllocator allocator,
+    vk::Device device,
+    vk::CommandPool commandPool,
+    vk::Queue queue,
+    const void *data,
+    vk::DeviceSize dataSize,
+    uint32_t width,
+    uint32_t height,
+    vk::Format format,
+    vk::Image &outImage,
+    VmaAllocation &outAlloc);
 
 // 5. One-Time Command Helper (Internal use)
 vk::CommandBuffer beginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool);
