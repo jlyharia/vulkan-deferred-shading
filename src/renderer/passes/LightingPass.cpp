@@ -11,7 +11,7 @@ void LightingPass::execute(vk::CommandBuffer cmd,
                            const GraphicsPipeline &pipeline,
                            uint32_t imageIndex,
                            vk::DescriptorSet globalDescSet,
-                           vk::DescriptorSet gbufferDescSet) const {
+                           vk::DescriptorSet lightingInputsDescSet) const {
     auto extent = swapChain_.getExtent();
     const vk::PipelineLayout layout = pipeline.getPipelineLayout();
 
@@ -36,8 +36,8 @@ void LightingPass::execute(vk::CommandBuffer cmd,
                                {globalDescSet}, {});
 
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               layout, DescriptorSets::GBUFFER_SET,
-                               {gbufferDescSet}, {});
+                               layout, DescriptorSets::LIGHTING_INPUTS_SET,
+                               {lightingInputsDescSet}, {});
 
         cmd.draw(3, 1, 0, 0); // fullscreen triangle — no vertex buffer
     }

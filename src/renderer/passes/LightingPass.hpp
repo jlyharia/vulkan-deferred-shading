@@ -14,7 +14,7 @@ struct LightingPass {
                  const GraphicsPipeline &pipeline,
                  uint32_t imageIndex,
                  vk::DescriptorSet globalDescSet,
-                 vk::DescriptorSet gbufferDescSet) const;
+                 vk::DescriptorSet lightingInputsDescSet) const;
 
 private:
     SwapChain &swapChain_;

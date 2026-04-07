@@ -31,16 +31,12 @@ Step
    ```
 6. conan build command `conan install . --output-folder=build --build=missing`
 
-You're under-invested in things that matter more:
+
 
 ┌───────────────────────────┬────────────────────────────────┬─────────────────────────────┐                       
 │           Item            │             Signal             │           Effort            │
-├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
-│ Shadow maps               │ Required baseline              │ High — but you need it      │
 ├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤
-│ Reversed-Z                │ Shows GPU precision awareness  │ Low — do this now           │                       
-├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
-│ SSAO                      │ Good visual/algorithm signal   │ Medium                      │                       
+│ Reversed-Z                │ Shows GPU precision awareness  │ Low — do this now           │                        
 ├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
 │ Render graph              │ Strong differentiator          │ High                        │
 ├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
@@ -50,14 +46,11 @@ You're under-invested in things that matter more:
 └───────────────────────────┴────────────────────────────────┴─────────────────────────────┘
 
 ## Todo
-1. Delete vulkan resources per frame.
-2. Move vulkan resource destroy into queue.
-3. horizontal grid plan
-4. - ~~Nsight to analyze frame time and gpu usage~~ 
-   -   RenderDoc is enough for your portfolio work. Learn Nsight after you land the role.
-- Shadow maps — direction light - interview staple, tests projection math 
+- horizontal grid plan
+- Percentage Closer Filtering
 - Being able to explain bandwidth/ALU tradeoffs verbally — more valuable than any tool
 - Reverse Z + infinite far plane — a classic optimization that shows you understand depth precision
+- write a simple memory allocator
 - Tiled deferred/Clustered deferred
   -  understand it deeply, implement it after you're hired or after shadows.
   - 
@@ -74,6 +67,9 @@ You're under-invested in things that matter more:
       Clustered is better but 3× the implementation work. Do tiled first. If you finish tiled and want to differentiate further, clustered is the upgrade.
   
     ```
+- move to cpp20 module
+
+
 # What I have done & learn
 - Vulkan 1.3
 - Vulkan CPP wrapper
@@ -90,7 +86,7 @@ You're under-invested in things that matter more:
 - SSAO with SSAO blur
 - shadow map with one direction light
 - Use renderdoc to check each shader's input and output texture
-
+- simple directional light shadow map with jiggle edge, no PCF(Percentage Closer Filtering)
 
 👉 為什麼 depth 是 non-linear？
 👉 或怎麼做 reversed Z + infinite far plane？

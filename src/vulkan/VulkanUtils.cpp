@@ -289,6 +289,36 @@ vk::ImageMemoryBarrier2 colorAttachmentToPresent(vk::Image image) noexcept {
            .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
 }
 
+vk::ImageMemoryBarrier2 undefinedToDepthAttachment(vk::Image image) noexcept {
+    return vk::ImageMemoryBarrier2()
+           .setOldLayout(vk::ImageLayout::eUndefined)
+           .setNewLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
+           .setSrcStageMask(vk::PipelineStageFlagBits2::eNone)
+           .setSrcAccessMask(vk::AccessFlagBits2::eNone)
+           .setDstStageMask(vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                            vk::PipelineStageFlagBits2::eLateFragmentTests)
+           .setDstAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentRead |
+                             vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setImage(image)
+           .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
+}
+
+vk::ImageMemoryBarrier2 depthAttachmentToShaderRead(vk::Image image) noexcept {
+    return vk::ImageMemoryBarrier2()
+           .setOldLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
+           .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+           .setSrcStageMask(vk::PipelineStageFlagBits2::eLateFragmentTests)
+           .setSrcAccessMask(vk::AccessFlagBits2::eDepthStencilAttachmentWrite)
+           .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
+           .setDstAccessMask(vk::AccessFlagBits2::eShaderRead)
+           .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+           .setImage(image)
+           .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
+}
+
 vk::WriteDescriptorSet imageSamplerWrite(
     vk::DescriptorSet              set,
     uint32_t                       binding,

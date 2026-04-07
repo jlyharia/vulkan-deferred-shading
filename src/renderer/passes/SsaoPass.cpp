@@ -24,7 +24,7 @@ SsaoPass::~SsaoPass() { cleanup(); }
 void SsaoPass::execute(vk::CommandBuffer cmd,
                        const GraphicsPipeline &pipeline,
                        vk::DescriptorSet globalDescSet,
-                       vk::DescriptorSet gbufferDescSet,
+                       vk::DescriptorSet lightingInputsDescSet,
                        vk::DescriptorSet ssaoDescSet) const {
     auto extent = swapChain_.getExtent();
     const vk::PipelineLayout layout = pipeline.getPipelineLayout();
@@ -48,8 +48,8 @@ void SsaoPass::execute(vk::CommandBuffer cmd,
                                {globalDescSet}, {});
 
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               layout, DescriptorSets::GBUFFER_SET,
-                               {gbufferDescSet}, {});
+                               layout, DescriptorSets::LIGHTING_INPUTS_SET,
+                               {lightingInputsDescSet}, {});
 
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                layout, DescriptorSets::SSAO_SET,

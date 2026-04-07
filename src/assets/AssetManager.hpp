@@ -3,7 +3,7 @@
 //
 #pragma once
 
-#include "renderer/Renderer.hpp"
+#include "common/VulkanInclude.hpp"
 #include "scene/TextureManager.hpp"
 
 #include <unordered_map>
@@ -17,8 +17,9 @@ struct Vertex;
 class AssetManager {
 public:
     AssetManager(VulkanContext &context, vk::CommandPool transferPool, TextureManager &textureManager,
-                 Renderer &renderer)
-        : context_(context), transferPool_(transferPool), textureManager_(textureManager), renderer_(renderer) {
+                 vk::DescriptorPool descriptorPool, vk::DescriptorSetLayout textureLayout)
+        : context_(context), transferPool_(transferPool), textureManager_(textureManager),
+          descriptorPool_(descriptorPool), textureLayout_(textureLayout) {
     }
 
     /** @brief Loads a model from a glTF/GLB file, assembles materials, and caches it. */
@@ -38,10 +39,17 @@ private:
                               const std::vector<Vertex> &vertices,
                               const std::vector<uint32_t> &indices);
 
+    /** @brief Allocates and writes a material texture descriptor set (set 1). */
+    [[nodiscard]] vk::DescriptorSet allocateTextureSet(vk::ImageView albedo,
+                                                       vk::ImageView normal,
+                                                       vk::ImageView metallicRoughness,
+                                                       vk::Sampler sampler) const;
+
     VulkanContext &context_;
     vk::CommandPool transferPool_;
     TextureManager &textureManager_;
-    Renderer &renderer_;
+    vk::DescriptorPool descriptorPool_;
+    vk::DescriptorSetLayout textureLayout_;
 
     std::unordered_map<std::string, std::shared_ptr<Mesh>> modelCache_;
     std::shared_ptr<Mesh> sharedSphere_ = nullptr;
