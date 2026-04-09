@@ -25,7 +25,7 @@ layout (set = 2, binding = 0) uniform sampler2D gbAlbedoMetallic;
 layout (set = 2, binding = 1) uniform sampler2D gbNormalRoughness;
 layout (set = 2, binding = 2) uniform sampler2D gbDepth;
 layout (set = 2, binding = 3) uniform sampler2D ssaoBuffer;
-layout (set = 2, binding = 4) uniform sampler2D shadowMap;
+layout (set = 2, binding = 4) uniform sampler2DShadow shadowMap; // hardware PCF
 
 const float PI = 3.14159265359;
 
@@ -74,7 +74,9 @@ vec3 evalBRDF(Surface s, float NdotV, float NdotL, float NdotH, float HdotV) {
     return kD * s.albedo / PI + specular;
 }
 
-/// Returns 1.0 = fully lit, 0.0 = fully shadowed. Hard shadow — no PCF.
+/// Returns 1.0 = fully lit, 0.0 = fully shadowed.
+/// Hardware PCF: sampler2DShadow with Linear filter does 2x2 bilinear blend of depth comparisons.
+/// Caller passes vec3(uv, refDepth) — GPU evaluates compareOp per tap and interpolates results.
 float shadowFactor(vec3 worldPos) {
     vec4 lightClip = ubo.dirLightSpaceMatrix * vec4(worldPos, 1.0);
     vec3 proj = lightClip.xyz / lightClip.w;  // orthographic: w=1, but keep general
@@ -86,12 +88,13 @@ float shadowFactor(vec3 worldPos) {
     if (proj.z < 0.0 || proj.z > 1.0)
         return 1.0;
 
-    float closestDepth = texture(shadowMap, shadowUV).r;
-    float currentDepth = proj.z;
-
     // Small bias to counteract residual acne after slope-scaled depth bias in the shadow pass
     float bias = 0.002;
-    return currentDepth - bias < closestDepth ? 1.0 : 0.0;
+    float currentDepth = proj.z - bias;
+
+    // texture(sampler2DShadow, vec3) — .z is the reference depth fed to compareOp (eLess).
+    // Returns fraction of the 2x2 footprint where frag depth < stored depth (i.e. lit).
+    return texture(shadowMap, vec3(shadowUV, currentDepth));
 }
 
 /// Reconstruct world-space position from depth buffer + inverse matrices.

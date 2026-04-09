@@ -43,7 +43,8 @@ void ShadowMap::createSampler() {
                        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
                        .setAnisotropyEnable(false)
                        .setUnnormalizedCoordinates(false)
-                       .setCompareEnable(false)
+                       .setCompareEnable(true)                        // enable hardware PCF
+                       .setCompareOp(vk::CompareOp::eLess)            // frag depth < map depth → lit; default is eNever (always shadowed)
                        .setMipmapMode(vk::SamplerMipmapMode::eNearest);
 
     sampler_ = context_.getDevice().createSampler(samplerInfo);

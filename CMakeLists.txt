@@ -109,6 +109,7 @@ add_executable(${TARGET_NAME}
         src/scene/DirLightView.hpp
         src/vulkan/ShadowMap.cpp
         src/vulkan/ShadowMap.hpp
+        src/renderer/passes/DirShadowPass.cpp
 )
 
 # ------------------------------------------------------------

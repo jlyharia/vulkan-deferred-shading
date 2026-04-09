@@ -67,7 +67,16 @@ Step
       Clustered is better but 3× the implementation work. Do tiled first. If you finish tiled and want to differentiate further, clustered is the upgrade.
   
     ```
-- move to cpp20 module
+- AAA Production + Portfolio Reviewer: Stop adding features after the render graph and focus on presentation. A renderer with 8 features you can explain deeply beats one with 12    
+features you're fuzzy on. Your Reinhard tone mapper is a known gap — swap it for ACES or Uncharted 2 filmic before interviews. Takes an hour, signals you know the difference.
+
+- Engine Architect: One compute shader pass would complete the picture. You have zero compute usage right now. Interviewers at engine companies will ask. The SSAO blur is the       
+natural candidate — move it from a graphics pipeline pass to a compute shader with shared-memory tile optimization. Shows you can cross the graphics/compute boundary in Vulkan,
+which is table stakes at id, Frostbite-era studios, and most modern engines.
+
+- GPU Systems: RenderDoc a frame and profile it before interviews. You should know your GPU timeline — how long each pass takes, whether you're bandwidth-bound or ALU-bound on the  
+lighting pass, what the SSAO sampling cost is. If an interviewer asks "how fast is your renderer?" and you don't have numbers, that's a red flag regardless of what features you
+have.
 
 
 # What I have done & learn
@@ -87,6 +96,7 @@ Step
 - shadow map with one direction light
 - Use renderdoc to check each shader's input and output texture
 - simple directional light shadow map with jiggle edge, no PCF(Percentage Closer Filtering)
+- add Percentage closer filtering 
 
 👉 為什麼 depth 是 non-linear？
 👉 或怎麼做 reversed Z + infinite far plane？
