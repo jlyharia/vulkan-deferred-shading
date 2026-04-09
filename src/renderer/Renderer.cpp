@@ -745,6 +745,9 @@ void Renderer::createDescriptorSetLayout() {
             vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
             // Binding 4: Directional shadow map
+            // vk::DescriptorSetLayoutBinding(4, vk::DescriptorType::eCombinedImageSampler, 1,
+            //                                vk::ShaderStageFlagBits::eFragment),
+            // Binding 4: Directional shadow map with hardware PCF
             vk::DescriptorSetLayoutBinding(4, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
         };
