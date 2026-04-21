@@ -33,17 +33,23 @@ Step
 
 
 
-┌───────────────────────────┬────────────────────────────────┬─────────────────────────────┐                       
-│           Item            │             Signal             │           Effort            │
-├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤
-│ Reversed-Z                │ Shows GPU precision awareness  │ Low — do this now           │                        
-├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
-│ Render graph              │ Strong differentiator          │ High                        │
-├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
-│ Stencil (standalone)      │ Noise                          │ Low — but what's the point? │
-├───────────────────────────┼────────────────────────────────┼─────────────────────────────┤                       
-│ Stencil for light volumes │ Real technique, visible payoff │ Medium                      │
-└───────────────────────────┴────────────────────────────────┴─────────────────────────────┘
+┌──────────┬───────────────────────────────────────────┬─────────────────────────────┬───────────────────────────────────────────────────────────────────────────┐               
+│ Priority │                  Feature                  │            Time             │                                    Why                                    │
+├──────────┼───────────────────────────────────────────┼─────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+│ 1        │ ~~PCF (3×3)~~                                │ 30 min                      │ Removes hard-edge embarrassment from every screenshot                     │
+├──────────┼───────────────────────────────────────────┼─────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+│ 2        │ Reversed-Z + infinite far plane           │ 1 day                       │ Known correctness gap, interviewers ask about depth precision             │                 
+├──────────┼───────────────────────────────────────────┼─────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤                 
+│ 3        │ ACES / Uncharted 2 tone mapping           │ 1 hour                      │ Reinhard is visually outdated and signals you haven't kept up             │                 
+├──────────┼───────────────────────────────────────────┼─────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤                 
+│ 4        │ Render graph                              │ 1–2 weeks                   │ Highest architecture signal, fixes the Renderer god object                │               
+├──────────┼───────────────────────────────────────────┼─────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤                 
+│ 5        │ Profile with RenderDoc + document numbers │ 1 day                       │ Every interview will ask; having GPU timings shows engineering discipline │               
+├──────────┼───────────────────────────────────────────┼─────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤                 
+│ 6        │ SSAO blur → compute shader                │ 2–3 days                    │ Only if time permits; plugs the "no compute" gap                          │               
+├──────────┼───────────────────────────────────────────┼─────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤                 
+│ 7        │ CSM                                       │ Skip until after interviews │ Render graph first; CSM without it is messy to implement                  │               
+└──────────┴───────────────────────────────────────────┴─────────────────────────────┴───────────────────────────────────────────────────────────────────────────┘
 
 ## Todo
 - horizontal grid plan
@@ -97,6 +103,7 @@ have.
 - Use renderdoc to check each shader's input and output texture
 - simple directional light shadow map with jiggle edge, no PCF(Percentage Closer Filtering)
 - add Percentage closer filtering 
+- Sample Render graph with texture
 
 👉 為什麼 depth 是 non-linear？
 👉 或怎麼做 reversed Z + infinite far plane？
@@ -119,12 +126,6 @@ Abstraction: Wrap these into classes like Shader, Buffer, and Texture to make th
    - 支援 2~3 frames in flight
    - 每 frame 有自己的 allocator + descriptor pool
    - 理解 pipeline barrier、fence、semaphore
-
-- **ImGui / debug UI integration**
-   - 用來監控 allocator狀態、G-buffer大小、frame time
-   - 面試加分：展示系統級 debugging
-
-❌ 不用先做 shader 或 fancy post-processing
 
 ---
 

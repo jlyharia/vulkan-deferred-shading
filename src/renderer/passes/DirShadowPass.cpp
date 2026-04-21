@@ -19,10 +19,6 @@ void DirShadowPass::execute(vk::CommandBuffer cmd,
                             const GraphicsPipeline &pipeline,
                             const std::vector<MeshInstance> &meshInstances,
                             const DirLightView &dirLight) const {
-    // Transition shadow map: undefined → depth attachment write (contents discarded, cleared on load)
-    auto preBarrier = vk_util::undefinedToDepthAttachment(shadowMap_.getDepthImage());
-    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(preBarrier));
-
     auto depthAttach = pass_util::depthAttachment(
         shadowMap_.getDepthView(),
         vk::ImageLayout::eDepthStencilAttachmentOptimal,
@@ -72,8 +68,4 @@ void DirShadowPass::execute(vk::CommandBuffer cmd,
         }
     }
     cmd.endRendering();
-
-    // Transition shadow map: depth attachment → shader-read for lighting pass sampling
-    auto postBarrier = vk_util::depthAttachmentToShaderRead(shadowMap_.getDepthImage());
-    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(postBarrier));
 }

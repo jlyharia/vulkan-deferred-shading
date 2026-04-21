@@ -110,6 +110,13 @@ add_executable(${TARGET_NAME}
         src/vulkan/ShadowMap.cpp
         src/vulkan/ShadowMap.hpp
         src/renderer/passes/DirShadowPass.cpp
+        src/renderer/passes/graph/RenderGraph.cpp
+        src/renderer/passes/graph/RenderGraph.hpp
+        src/renderer/passes/graph/RGPass.hpp
+        src/renderer/passes/graph/RGTexture.hpp
+        src/renderer/passes/graph/CompiledPass.hpp
+        src/renderer/passes/graph/RGTextureAccess.hpp
+        src/renderer/passes/graph/TextureState.hpp
 )
 
 # ------------------------------------------------------------

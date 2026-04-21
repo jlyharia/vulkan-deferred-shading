@@ -58,10 +58,6 @@ void SsaoPass::execute(vk::CommandBuffer cmd,
         cmd.draw(3, 1, 0, 0); // fullscreen triangle — no vertex buffer
     }
     cmd.endRendering();
-
-    // Pipeline barrier: SSAO buffer → shader-read for blur pass
-    auto barrier = vk_util::colorAttachmentToShaderRead(ssaoBuffer_.image);
-    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
 }
 
 /**

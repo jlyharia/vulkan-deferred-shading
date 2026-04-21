@@ -18,6 +18,7 @@
 #include "scene/Mesh.hpp"
 #include "passes/SsaoPass.hpp"
 #include "passes/SsaoBlurPass.hpp"
+#include "passes/graph/RenderGraph.hpp"
 #include "vulkan/VulkanContext.hpp"
 #include "vulkan/SwapChain.hpp"
 #include "vulkan/GBuffer.hpp"
@@ -163,6 +164,158 @@ void Renderer::initResources() {
     createSsaoBlurDescriptorSet();
     lightingPass_ = std::make_unique<LightingPass>(swapChain_);
     overlayPass_ = std::make_unique<OverlayPass>(swapChain_);
+    renderGraph_ = std::make_unique<RenderGraph>();
+    rebuildRenderGraph();
+}
+
+
+// Texture names used in both registerTexture() and per-pass read/write declarations.
+// Centralised here so a typo causes a compile error rather than a silent graph mis-wire.
+namespace texName {
+    constexpr std::string_view shadowMap      = "shadowMap";
+    constexpr std::string_view albedoMetallic = "albedoMetallic";
+    constexpr std::string_view normalRoughness= "normalRoughness";
+    constexpr std::string_view ssaoBuffer     = "ssaoBuffer";
+    constexpr std::string_view ssaoBlur       = "ssaoBlur";
+    constexpr std::string_view gbufferDepth   = "gbufferDepth";
+}
+
+void Renderer::rebuildRenderGraph() {
+    renderGraph_->reset();
+
+    renderGraph_->registerTexture({
+        .name          = std::string(texName::shadowMap),
+        .image         = shadowMap_->getDepthImage(),
+        .view          = shadowMap_->getDepthView(),
+        .format        = ShadowMap::DEPTH_FORMAT,
+        .initialLayout = vk::ImageLayout::eUndefined,
+    });
+    renderGraph_->registerTexture({
+        .name          = std::string(texName::albedoMetallic),
+        .image         = gbuffer_->getAlbedoMetallicImage(),
+        .view          = gbuffer_->getAlbedoMetallicView(),
+        .format        = GBuffer::ALBEDO_METALLIC_FORMAT,
+        .initialLayout = vk::ImageLayout::eUndefined,
+    });
+    renderGraph_->registerTexture({
+        .name          = std::string(texName::normalRoughness),
+        .image         = gbuffer_->getNormalRoughnessImage(),
+        .view          = gbuffer_->getNormalRoughnessView(),
+        .format        = GBuffer::NORMAL_ROUGHNESS_FORMAT,
+        .initialLayout = vk::ImageLayout::eUndefined,
+    });
+    renderGraph_->registerTexture({
+        .name          = std::string(texName::ssaoBuffer),
+        .image         = ssaoPass_->getSsaoBufferImage(),
+        .view          = ssaoPass_->getSsaoKernelBufferImageView(),
+        .format        = SsaoPass::SSAO_BUFFER_FORMAT,
+        .initialLayout = vk::ImageLayout::eUndefined,
+    });
+    renderGraph_->registerTexture({
+        .name          = std::string(texName::ssaoBlur),
+        .image         = ssaoBlurPass_->getBlurredImage(),
+        .view          = ssaoBlurPass_->getBlurredImageView(),
+        .format        = SsaoBlurPass::SSAO_BLUR_BUFFER_FORMAT,
+        .initialLayout = vk::ImageLayout::eUndefined,
+    });
+    // prepareFrameImages transitions depth Undefined→DepthStencilAttachment before graph runs
+    renderGraph_->registerTexture({
+        .name          = std::string(texName::gbufferDepth),
+        .image         = swapChain_.getDepthImage(),
+        .view          = swapChain_.getDepthImageView(),
+        .format        = ShadowMap::DEPTH_FORMAT,
+        .initialLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
+    });
+
+    using Stage  = vk::PipelineStageFlagBits2;
+    using Access = vk::AccessFlagBits2;
+    using Layout = vk::ImageLayout;
+
+    using tn = texName;
+
+    renderGraph_->addPass({
+        .name          = "DirShadow",
+        .readTextures  = {},
+        .writeTextures = {{
+            .name   = std::string(tn::shadowMap),
+            .layout = Layout::eDepthStencilAttachmentOptimal,
+            .stage  = Stage::eEarlyFragmentTests | Stage::eLateFragmentTests,
+            .access = Access::eDepthStencilAttachmentWrite,
+        }},
+        .execute = [this](vk::CommandBuffer cmd) {
+            dirShadowPass_->execute(cmd, *graphicsPipeline_, *meshInstances_, *dirLight_);
+        },
+    });
+
+    renderGraph_->addPass({
+        .name          = "Geometry",
+        .readTextures  = {},
+        .writeTextures = {
+            { std::string(tn::albedoMetallic),  Layout::eColorAttachmentOptimal,        Stage::eColorAttachmentOutput,                          Access::eColorAttachmentWrite },
+            { std::string(tn::normalRoughness), Layout::eColorAttachmentOptimal,        Stage::eColorAttachmentOutput,                          Access::eColorAttachmentWrite },
+            { std::string(tn::gbufferDepth),    Layout::eDepthStencilAttachmentOptimal, Stage::eEarlyFragmentTests | Stage::eLateFragmentTests, Access::eDepthStencilAttachmentWrite },
+        },
+        .execute = [this](vk::CommandBuffer cmd) {
+            geometryPass_->execute(cmd, *graphicsPipeline_, descriptorSets_[currentFrame],
+                                   *meshInstances_, defaultMaterial, sphereMesh_);
+        },
+    });
+
+    renderGraph_->addPass({
+        .name = "Ssao",
+        .readTextures = {
+            { std::string(tn::albedoMetallic),  Layout::eShaderReadOnlyOptimal, Stage::eFragmentShader, Access::eShaderSampledRead },
+            { std::string(tn::normalRoughness), Layout::eShaderReadOnlyOptimal, Stage::eFragmentShader, Access::eShaderSampledRead },
+            { std::string(tn::gbufferDepth),    Layout::eDepthReadOnlyOptimal,  Stage::eFragmentShader, Access::eShaderSampledRead },
+        },
+        .writeTextures = {{
+            .name   = std::string(tn::ssaoBuffer),
+            .layout = Layout::eColorAttachmentOptimal,
+            .stage  = Stage::eColorAttachmentOutput,
+            .access = Access::eColorAttachmentWrite,
+        }},
+        .execute = [this](vk::CommandBuffer cmd) {
+            ssaoPass_->execute(cmd, *graphicsPipeline_,
+                               descriptorSets_[currentFrame], lightingInputsDescSets_[currentFrame],
+                               ssaoBufferDescriptorSet_);
+        },
+    });
+
+    renderGraph_->addPass({
+        .name = "SsaoBlur",
+        .readTextures = {{
+            .name   = std::string(tn::ssaoBuffer),
+            .layout = Layout::eShaderReadOnlyOptimal,
+            .stage  = Stage::eFragmentShader,
+            .access = Access::eShaderSampledRead,
+        }},
+        .writeTextures = {{
+            .name   = std::string(tn::ssaoBlur),
+            .layout = Layout::eColorAttachmentOptimal,
+            .stage  = Stage::eColorAttachmentOutput,
+            .access = Access::eColorAttachmentWrite,
+        }},
+        .execute = [this](vk::CommandBuffer cmd) {
+            ssaoBlurPass_->execute(cmd, *graphicsPipeline_, ssaoBlurDescriptorSet_);
+        },
+    });
+
+    renderGraph_->addPass({
+        .name = "Lighting",
+        .readTextures = {
+            { std::string(tn::albedoMetallic),  Layout::eShaderReadOnlyOptimal, Stage::eFragmentShader, Access::eShaderSampledRead },
+            { std::string(tn::normalRoughness), Layout::eShaderReadOnlyOptimal, Stage::eFragmentShader, Access::eShaderSampledRead },
+            { std::string(tn::ssaoBlur),        Layout::eShaderReadOnlyOptimal, Stage::eFragmentShader, Access::eShaderSampledRead },
+            { std::string(tn::shadowMap),       Layout::eShaderReadOnlyOptimal, Stage::eFragmentShader, Access::eShaderSampledRead },
+        },
+        .writeTextures = {},
+        .execute = [this](vk::CommandBuffer cmd) {
+            lightingPass_->execute(cmd, *graphicsPipeline_, currentImageIndex_,
+                                   descriptorSets_[currentFrame], lightingInputsDescSets_[currentFrame]);
+        },
+    });
+
+    renderGraph_->compile();
 }
 
 
@@ -179,29 +332,19 @@ void Renderer::createCommandBuffers() {
 
 
 void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
-                                   const GraphicsPipeline &graphicsPipeline,
                                    const uint32_t imageIndex,
-                                   const UserInterface &userInterface,
-                                   const std::vector<MeshInstance> &meshInstances,
-                                   const uint32_t instanceCount,
-                                   const DirLightView &dirLight) const {
+                                   const UserInterface &userInterface) const {
     auto beginInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
     cmd.begin(beginInfo);
     {
         prepareFrameImages(cmd, imageIndex);
 
-        dirShadowPass_->execute(cmd, graphicsPipeline, meshInstances, dirLight);
+        renderGraph_->execute(cmd);
 
-        geometryPass_->execute(cmd, graphicsPipeline, descriptorSets_[currentFrame],
-                               meshInstances, defaultMaterial, sphereMesh_);
-        ssaoPass_->execute(cmd, graphicsPipeline,
-                           descriptorSets_[currentFrame], lightingInputsDescSets_[currentFrame],
-                           ssaoBufferDescriptorSet_);
-        ssaoBlurPass_->execute(cmd, graphicsPipeline, ssaoBlurDescriptorSet_);
-        lightingPass_->execute(cmd, graphicsPipeline, imageIndex,
-                               descriptorSets_[currentFrame], lightingInputsDescSets_[currentFrame]);
-        overlayPass_->execute(cmd, graphicsPipeline, imageIndex,
-                              descriptorSets_[currentFrame], sphereMesh_, instanceCount);
+        // Overlay runs after the graph: depth is already eDepthReadOnlyOptimal (Lighting declared it),
+        // swapchain color has Lighting's output. Overlay eLoads both — no barriers needed.
+        overlayPass_->execute(cmd, *graphicsPipeline_, imageIndex,
+                              descriptorSets_[currentFrame], sphereMesh_, currentInstanceCount_);
 
         // UI pass (ImGui handles its own begin/endRendering)
         userInterface.recordCommands(cmd, imageIndex);
@@ -229,13 +372,9 @@ void Renderer::prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) co
                                                  .setImage(swapChain_.getDepthImage())
                                                  .setSubresourceRange({vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1});
 
-    std::array<vk::ImageMemoryBarrier2, 6> barriers = {
+    std::array<vk::ImageMemoryBarrier2, 2> barriers = {
         vk_util::undefinedToColorAttachment(swapChain_.getImages()[imageIndex]),
         depthBarrier,
-        vk_util::undefinedToColorAttachment(gbuffer_->getAlbedoMetallicImage()),
-        vk_util::undefinedToColorAttachment(gbuffer_->getNormalRoughnessImage()),
-        vk_util::undefinedToColorAttachment(ssaoPass_->getSsaoBufferImage()),
-        vk_util::undefinedToColorAttachment(ssaoBlurPass_->getBlurredImage()),
     };
     cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
 }
@@ -312,9 +451,14 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
     updateUniformBuffer(currentFrame, camera, pointLights, dirLight);
     const uint32_t instanceCount = updateInstanceBuffer(currentFrame, meshInstances);
 
+    graphicsPipeline_     = &graphicsPipeline;
+    meshInstances_        = &meshInstances;
+    dirLight_             = &dirLight;
+    currentImageIndex_    = imageIndex;
+    currentInstanceCount_ = instanceCount;
+
     commandBuffers_[currentFrame].reset();
-    recordCommandBuffer(commandBuffers_[currentFrame], graphicsPipeline, imageIndex, userInterface, meshInstances,
-                        instanceCount, dirLight);
+    recordCommandBuffer(commandBuffers_[currentFrame], imageIndex, userInterface);
 
     // 5. Submit Info (Modern C++ Style)
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
@@ -377,10 +521,13 @@ void Renderer::recreateSwapChain() {
     // The swapchain depth view is also new after recreate(), so both sets must be rewritten.
     ssaoPass_.reset();
     ssaoBlurPass_.reset();
-    ssaoPass_   = std::make_unique<SsaoPass>(swapChain_, context_);
+    ssaoPass_ = std::make_unique<SsaoPass>(swapChain_, context_);
     ssaoBlurPass_ = std::make_unique<SsaoBlurPass>(swapChain_, context_);
     updateSsaoDescriptorSets();
     updateSsaoBlurDescriptorSet();
+
+    // Re-register graph textures so barriers use the new image handles from the recreated resources.
+    rebuildRenderGraph();
 
     // Note: Since we use Dynamic State for Viewport/Scissor,
     // we do NOT need to recreate the Pipeline!
@@ -455,9 +602,9 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera,
     ubo.proj = camera.getProjectionMatrix(swapChain_.getExtent().width / (float)swapChain_.getExtent().height);
     ubo.invView = glm::inverse(ubo.view);
     ubo.invProj = glm::inverse(ubo.proj);
-    ubo.cameraPos           = glm::vec4(camera.position, 0.0f);
+    ubo.cameraPos = glm::vec4(camera.position, 0.0f);
     ubo.dirLightSpaceMatrix = dirLight.lightSpaceMatrix();
-    ubo.dirLightDir         = glm::vec4(glm::normalize(dirLight.target - dirLight.position), 0.0f);
+    ubo.dirLightDir = glm::vec4(glm::normalize(dirLight.target - dirLight.position), 0.0f);
 
     const size_t count = std::min(pointLights.size(), size_t{24});
     for (size_t i = 0; i < count; ++i)
@@ -552,10 +699,10 @@ void Renderer::updateLightingInputsDescSets() {
                           .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
                           .setImageView(gbuffer_->getNormalRoughnessView())
                           .setSampler(nearestClampSampler_);
-        auto depthInfo  = vk::DescriptorImageInfo()
-                          .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
-                          .setImageView(swapChain_.getDepthImageView())
-                          .setSampler(nearestClampSampler_);
+        auto depthInfo = vk::DescriptorImageInfo()
+                         .setImageLayout(vk::ImageLayout::eDepthReadOnlyOptimal)
+                         .setImageView(swapChain_.getDepthImageView())
+                         .setSampler(nearestClampSampler_);
 
         auto shadowInfo = vk::DescriptorImageInfo()
                           .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)

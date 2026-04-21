@@ -233,6 +233,19 @@ void AttachmentImage::cleanup(vk::Device device, VmaAllocator allocator) noexcep
     if (image) { vmaDestroyImage(allocator, image, allocation); image = nullptr; allocation = nullptr; }
 }
 
+vk::ImageAspectFlags imageAspect(vk::Format format) noexcept {
+    switch (format) {
+        case vk::Format::eD16Unorm:
+        case vk::Format::eD32Sfloat:
+        case vk::Format::eD16UnormS8Uint:
+        case vk::Format::eD24UnormS8Uint:
+        case vk::Format::eD32SfloatS8Uint:
+            return vk::ImageAspectFlagBits::eDepth;
+        default:
+            return vk::ImageAspectFlagBits::eColor;
+    }
+}
+
 vk::ImageMemoryBarrier2 colorAttachmentToShaderRead(vk::Image image) noexcept {
     return vk::ImageMemoryBarrier2()
            .setSrcStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput)

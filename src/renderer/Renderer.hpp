@@ -15,6 +15,7 @@
 
 #include "common/Config.hpp"
 
+class RenderGraph;
 class SsaoBlurPass;
 class SsaoPass;
 struct Texture;
@@ -85,12 +86,8 @@ private:
     void createSyncObjects();
 
     void recordCommandBuffer(vk::CommandBuffer cmd,
-                             const GraphicsPipeline &graphicsPipeline,
                              uint32_t imageIndex,
-                             const UserInterface &userInterface,
-                             const std::vector<MeshInstance> &meshInstances,
-                             uint32_t instanceCount,
-                             const DirLightView &dirLight) const;
+                             const UserInterface &userInterface) const;
     void prepareFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
     void finalizeFrameImages(vk::CommandBuffer cmd, uint32_t imageIndex) const;
 
@@ -110,6 +107,7 @@ private:
     void createSsaoBlurDescriptorSet();
     void updateSsaoDescriptorSets();
     void updateSsaoBlurDescriptorSet();
+    void rebuildRenderGraph(); // image/view handles change after swapchain or G-buffer recreation, so the graph must be rebuilt
 
     // --- Members ---
     VulkanContext &context_;
@@ -166,6 +164,14 @@ private:
     std::unique_ptr<SsaoBlurPass> ssaoBlurPass_;
     std::unique_ptr<LightingPass> lightingPass_;
     std::unique_ptr<OverlayPass> overlayPass_;
+    std::unique_ptr<RenderGraph> renderGraph_;
 
     Material defaultMaterial;
+
+    // Frame-scoped state — set at top of drawFrame(), read by render graph lambdas
+    const GraphicsPipeline          *graphicsPipeline_     = nullptr;
+    const std::vector<MeshInstance> *meshInstances_        = nullptr;
+    const DirLightView              *dirLight_             = nullptr;
+    uint32_t                         currentImageIndex_    = 0;
+    uint32_t                         currentInstanceCount_ = 0;
 };
