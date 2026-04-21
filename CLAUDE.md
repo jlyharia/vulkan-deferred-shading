@@ -53,7 +53,8 @@ src/
   common/       — GPU structs, Config, enums
   external/     — VMA/vendor impl files
   renderer/     — Renderer, UserInterface
-    passes/     — ForwardPass, GeometryPass, LightingPass, OverlayPass
+    passes/     — ForwardPass, GeometryPass, LightingPass, OverlayPass, DirShadowPass, SsaoPass, SsaoBlurPass
+      graph/    — RenderGraph, RGPass, RGTexture, RGTextureAccess, TextureState, CompiledPass
   scene/        — Camera, Mesh, MeshInstance, Texture, etc.
   vulkan/       — VulkanContext, SwapChain, GBuffer, GraphicsPipeline, etc.
 ```
@@ -66,6 +67,20 @@ Each pass is a plain struct with an `execute(vk::CommandBuffer, ...)` method. No
 | `GeometryPass` | GeometryPass.hpp/cpp | G-buffer fill + gbuffer barrier (producer-side) |
 | `LightingPass` | LightingPass.hpp/cpp | Fullscreen BRDF triangle, writes to swapchain |
 | `OverlayPass` | OverlayPass.hpp/cpp | Light sphere visualization (depth-test-read-only) |
+| `DirShadowPass` | DirShadowPass.hpp/cpp | Renders scene from light POV into shadow map depth image; barriers to shader-read |
+| `SsaoPass` | SsaoPass.hpp/cpp | SSAO occlusion factor into R8Unorm RT; owns noise texture + kernel buffer |
+| `SsaoBlurPass` | SsaoBlurPass.hpp/cpp | Bilateral blur over the SSAO buffer |
+
+### Render graph (`src/renderer/passes/graph/`)
+Frame-level DAG that owns barrier derivation. Not yet wired into the render loop — under construction.
+| Type | Role |
+|------|------|
+| `RenderGraph` | Owns texture registry + pass list; runs `compile()` then `execute()` each frame |
+| `RGPass` | Graph node: declares `readTextures`/`writeTextures` + `execute` lambda |
+| `RGTexture` | Handle: `vk::Image` + `vk::ImageView` + format + initial layout |
+| `RGTextureAccess` | Per-pass texture declaration: name + expected layout + stage + access flags |
+| `TextureState` | Mutable tracking state during `compile()`: current layout/stage/access |
+| `CompiledPass` | Compile output: `RGPass` + pre-baked `vk::ImageMemoryBarrier2` list |
 
 `Renderer::renderDeferred()` is a thin 3-line orchestrator calling the deferred passes.
 `Renderer::recordCommandBuffer()` dispatches to `forwardPass_->execute()` or `renderDeferred()`.
@@ -79,7 +94,7 @@ Each pass is a plain struct with an `execute(vk::CommandBuffer, ...)` method. No
 2. LightingPass — fullscreen Cook-Torrance BRDF triangle into swapchain
 3. OverlayPass — instanced light spheres with depth test (read-only), no depth write
 
-## Current State (2026-03-20)
+## Current State (2026-04-19)
 - PBR Cook-Torrance BRDF ✓
 - Deferred rendering (G-buffer + lighting pass) ✓
 - Point lights in GlobalUBO ✓
@@ -89,11 +104,14 @@ Each pass is a plain struct with an `execute(vk::CommandBuffer, ...)` method. No
 - Pass extraction into `src/renderer/passes/` ✓
 - `src/assets/` (was `core/` + `system/`) ✓
 - `RenderPath::ForwardPlus` added to Config.hpp ✓
+- Directional shadow map with PCF hardware filtering ✓
+- SSAO with bilateral blur pass ✓
+- Render graph skeleton (`passes/graph/`) — compile/barrier derivation done, not yet wired into render loop (in progress)
 
 ## Roadmap
 1. ~~Deferred rendering (G-buffer + lighting pass)~~ ✓
 2. Depth reconstruct
-3. Shadow maps
-4. Render graph
+3. ~~Shadow maps~~ ✓
+4. Render graph (in progress)
 5. Reversed Z + infinite far plane
-6. SSAO (`ssaoEnabled_` bool flag on Renderer, not a separate RenderPath)
+6. ~~SSAO~~ ✓

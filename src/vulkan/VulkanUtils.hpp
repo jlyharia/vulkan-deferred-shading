@@ -91,6 +91,9 @@ vk::ImageView createImageView(
     const uint32_t mipLevels = 1
     );
 
+// Returns eDepth for depth/depth-stencil formats, eColor for everything else.
+[[nodiscard]] vk::ImageAspectFlags imageAspect(vk::Format format) noexcept;
+
 // =============================================================================
 // Barrier factories — common image layout transitions for the render loop.
 // All return ImageMemoryBarrier2 (Vulkan 1.3 synchronization2).

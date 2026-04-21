@@ -2,7 +2,6 @@
 
 #include "PassUtils.hpp"
 #include "common/Config.hpp"
-#include "vulkan/VulkanUtils.hpp"
 #include "common/PushConstantConstant.hpp"
 #include "scene/Mesh.hpp"
 #include "vulkan/GBuffer.hpp"
@@ -89,12 +88,4 @@ void GeometryPass::execute(vk::CommandBuffer cmd,
         }
     }
     cmd.endRendering();
-
-    // Pipeline barrier: G-buffer color attachments + depth → shader-read for lighting pass
-    std::array<vk::ImageMemoryBarrier2, 3> barriers = {
-        vk_util::colorAttachmentToShaderRead(gbuffer_.getAlbedoMetallicImage()),
-        vk_util::colorAttachmentToShaderRead(gbuffer_.getNormalRoughnessImage()),
-        vk_util::depthToShaderRead(swapChain_.getDepthImage()),
-    };
-    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barriers));
 }

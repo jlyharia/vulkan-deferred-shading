@@ -47,10 +47,6 @@ void SsaoBlurPass::execute(vk::CommandBuffer cmd,
         cmd.draw(3, 1, 0, 0);
     }
     cmd.endRendering();
-
-    // Barrier: blurred output → shader-read for lighting pass
-    auto barrier = vk_util::colorAttachmentToShaderRead(ssaoBlurBuffer_.image);
-    cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
 }
 
 void SsaoBlurPass::createImages(uint32_t width, uint32_t height) {
