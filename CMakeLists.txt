@@ -17,7 +17,6 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(glslang CONFIG REQUIRED)
 find_package(stb REQUIRED)
-find_package(tinyobjloader REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(TinyGLTF REQUIRED)
 
@@ -151,7 +150,6 @@ target_link_libraries(${TARGET_NAME}
         glslang::glslang
         glslang::SPIRV
         stb::stb
-        tinyobjloader::tinyobjloader
         imgui::imgui
         TinyGLTF::TinyGLTF
 )

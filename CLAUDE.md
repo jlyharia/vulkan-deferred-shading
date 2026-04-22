@@ -94,7 +94,7 @@ Frame-level DAG that owns barrier derivation. Not yet wired into the render loop
 2. LightingPass — fullscreen Cook-Torrance BRDF triangle into swapchain
 3. OverlayPass — instanced light spheres with depth test (read-only), no depth write
 
-## Current State (2026-04-19)
+## Current State (2026-04-21)
 - PBR Cook-Torrance BRDF ✓
 - Deferred rendering (G-buffer + lighting pass) ✓
 - Point lights in GlobalUBO ✓
@@ -107,6 +107,7 @@ Frame-level DAG that owns barrier derivation. Not yet wired into the render loop
 - Directional shadow map with PCF hardware filtering ✓
 - SSAO with bilateral blur pass ✓
 - Render graph skeleton (`passes/graph/`) — compile/barrier derivation done, not yet wired into render loop (in progress)
+- Tone mapping: ACES (Narkowicz 2015 fitted curve) active; Reinhard commented out in `lighting.frag`
 
 ## Roadmap
 1. ~~Deferred rendering (G-buffer + lighting pass)~~ ✓
