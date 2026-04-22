@@ -31,10 +31,10 @@ const float PI = 3.14159265359;
 
 // Surface material unpacked from G-buffer
 struct Surface {
-    vec3  albedo;
+    vec3 albedo;
     float metallic;
     float roughness;
-    vec3  F0;       // base reflectivity: 0.04 for dielectrics, albedo-tinted for metals
+    vec3 F0;       // base reflectivity: 0.04 for dielectrics, albedo-tinted for metals
 };
 
 // --- Cook-Torrance BRDF functions ---
@@ -68,7 +68,7 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
 vec3 evalBRDF(Surface s, float NdotV, float NdotL, float NdotH, float HdotV) {
     float D = distributionGGX(NdotH, s.roughness);
     float G = geometrySmith(NdotV, NdotL, s.roughness);
-    vec3  F = fresnelSchlick(HdotV, s.F0);
+    vec3 F = fresnelSchlick(HdotV, s.F0);
     vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
     vec3 kD = (vec3(1.0) - F) * (1.0 - s.metallic);
     return kD * s.albedo / PI + specular;
@@ -84,9 +84,9 @@ float shadowFactor(vec3 worldPos) {
 
     // Outside the light frustum → treat as lit
     if (any(lessThan(shadowUV, vec2(0.0))) || any(greaterThan(shadowUV, vec2(1.0))))
-        return 1.0;
+    return 1.0;
     if (proj.z < 0.0 || proj.z > 1.0)
-        return 1.0;
+    return 1.0;
 
     // Small bias to counteract residual acne after slope-scaled depth bias in the shadow pass
     float bias = 0.002;
@@ -125,18 +125,18 @@ void main() {
     vec3 worldPos = reconstructWorldPos(inUV, depth);
 
     Surface surf;
-    surf.albedo    = albedoMetallic.rgb;
-    surf.metallic  = albedoMetallic.a;
+    surf.albedo = albedoMetallic.rgb;
+    surf.metallic = albedoMetallic.a;
     surf.roughness = normalRoughness.a;
-    surf.F0        = mix(vec3(0.04), surf.albedo, surf.metallic);
+    surf.F0 = mix(vec3(0.04), surf.albedo, surf.metallic);
 
-    vec3 V    = normalize(ubo.cameraPos.xyz - worldPos);
+    vec3 V = normalize(ubo.cameraPos.xyz - worldPos);
     float NdotV = max(dot(N, V), 0.0001);
 
     // --- Evaluate all point lights ---
     vec3 Lo = vec3(0.0);
     for (int i = 0; i < 24; i++) {
-        vec3 Ldir  = ubo.pointLights[i].position.xyz - worldPos;
+        vec3 Ldir = ubo.pointLights[i].position.xyz - worldPos;
         float dist = length(Ldir);
         float radius = ubo.pointLights[i].color.w;
 
@@ -147,10 +147,10 @@ void main() {
         vec3 H = normalize(V + L);
 
         // KHR_lights_punctual windowed attenuation — smoothly reaches 0 at radius, no pop
-        float window     = pow(max(1.0 - pow(dist / radius, 4.0), 0.0), 2.0);
-        float intensity  = ubo.pointLights[i].position.w;
+        float window = pow(max(1.0 - pow(dist / radius, 4.0), 0.0), 2.0);
+        float intensity = ubo.pointLights[i].position.w;
         float attenuation = (intensity / (dist * dist + 1.0)) * window;
-        vec3 radiance    = ubo.pointLights[i].color.xyz * attenuation;
+        vec3 radiance = ubo.pointLights[i].color.xyz * attenuation;
 
         float NdotL = max(dot(N, L), 0.0);
         float NdotH = max(dot(N, H), 0.0);
@@ -180,8 +180,13 @@ void main() {
 
     vec3 color = ambient + Lo;
 
-    // Tone mapping (Reinhard) + gamma correction
-    color = color / (color + vec3(1.0));
+    // Tone mapping + gamma correction
+    // Reinhard:  color = color / (color + vec3(1.0));
+    // ACES:
+    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    color = clamp((color * (a * color + b)) / (color * (c * color + d) + e), 0.0, 1.0);
+
+
     color = pow(color, vec3(1.0 / 2.2));
     outColor = vec4(color, 1.0);
     //    outColor = vec4(vec3(ao), 1.0);

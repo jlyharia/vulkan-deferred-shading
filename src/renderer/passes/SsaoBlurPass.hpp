@@ -16,14 +16,15 @@ struct SsaoBlurPass {
                  vk::DescriptorSet blurDescSet) const;
 
     [[nodiscard]] vk::ImageView getBlurredImageView() const { return ssaoBlurBuffer_.view; }
-    [[nodiscard]] vk::Image     getBlurredImage()     const { return ssaoBlurBuffer_.image; }
+    [[nodiscard]] vk::Image getBlurredImage() const { return ssaoBlurBuffer_.image; }
+    static constexpr vk::Format SSAO_BLUR_BUFFER_FORMAT = vk::Format::eR8Unorm;
 
 private:
     SwapChain &swapChain_;
     VulkanContext &context_;
 
     vk_util::AttachmentImage ssaoBlurBuffer_;
-    static constexpr vk::Format SSAO_BLUR_BUFFER_FORMAT = vk::Format::eR8Unorm;
+
 
     void createImages(uint32_t width, uint32_t height);
     void cleanup();

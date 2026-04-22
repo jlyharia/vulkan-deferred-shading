@@ -24,6 +24,8 @@ struct SsaoPass {
     [[nodiscard]] vk::ImageView getSsaoNoiseImageView()        const { return ssaoNoiseImageView_; }
     [[nodiscard]] vk::Buffer    getKernelBuffer()              const { return kernelBuffer_; }
     [[nodiscard]] vk::Image     getSsaoBufferImage()           const { return ssaoBuffer_.image; }
+    static constexpr vk::Format SSAO_BUFFER_FORMAT = vk::Format::eR8Unorm;
+
 private:
     SwapChain &swapChain_;
     VulkanContext &context_;
@@ -46,7 +48,6 @@ private:
     void createImages(uint32_t width, uint32_t height);
     void cleanup();
     // SSAO outputs a single float. Should be vk::Format::eR8Unorm — 1 byte/pixel
-    static constexpr vk::Format SSAO_BUFFER_FORMAT = vk::Format::eR8Unorm;
     static constexpr vk::Format SSAO_NOISE_FORMAT = vk::Format::eR16G16Sfloat;
 
 

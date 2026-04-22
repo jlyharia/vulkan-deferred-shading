@@ -231,7 +231,7 @@ void Renderer::rebuildRenderGraph() {
     using Access = vk::AccessFlagBits2;
     using Layout = vk::ImageLayout;
 
-    using tn = texName;
+    namespace tn = texName;
 
     renderGraph_->addPass({
         .name          = "DirShadow",
