@@ -41,10 +41,16 @@ public:
         return glm::lookAtRH(position, position + forward, up);
     }
 
-    // Returns the projection matrix for the UBO
+    // Returns the projection matrix for the UBO.
+    // Reverse-Z with infinite far plane: near maps to 1.0, depth approaches 0.0 at infinity.
+    // GLM has no convenience for this, so the matrix is built directly.
     [[nodiscard]] glm::mat4 getProjectionMatrix(float aspectRatio) const {
-        auto proj = glm::perspective(glm::radians(fov), aspectRatio, 0.1f, 100.0f);
-        proj[1][1] *= -1; // Vulkan Y-flip
+        float f = 1.0f / tan(glm::radians(fov) * 0.5f);
+        glm::mat4 proj(0.0f);
+        proj[0][0] =  f / aspectRatio;
+        proj[1][1] = -f;    // Vulkan Y-flip
+        proj[2][3] = -1.0f; // perspective divide
+        proj[3][2] =  0.1f; // near; no far term → infinite far plane
         return proj;
     }
 

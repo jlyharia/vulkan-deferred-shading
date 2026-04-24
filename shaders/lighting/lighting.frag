@@ -88,9 +88,10 @@ float shadowFactor(vec3 worldPos) {
     if (proj.z < 0.0 || proj.z > 1.0)
     return 1.0;
 
-    // Small bias to counteract residual acne after slope-scaled depth bias in the shadow pass
+    // Small bias to counteract residual acne after slope-scaled depth bias in the shadow pass.
+    // Reverse-Z: add bias to push reference toward 1.0 (lit side for eGreaterOrEqual).
     float bias = 0.002;
-    float currentDepth = proj.z - bias;
+    float currentDepth = proj.z + bias;
 
     // texture(sampler2DShadow, vec3) — .z is the reference depth fed to compareOp (eLess).
     // Returns fraction of the 2x2 footprint where frag depth < stored depth (i.e. lit).
@@ -114,8 +115,8 @@ void main() {
     vec4 normalRoughness = texture(gbNormalRoughness, inUV);
     float depth = texture(gbDepth, inUV).r;
 
-    // Sky/background pixels — no geometry wrote here
-    if (depth >= 1.0) {
+    // Sky/background pixels — no geometry wrote here (reverse-Z: clear = 0.0)
+    if (depth <= 0.0) {
         outColor = vec4(0.02, 0.02, 0.02, 1.0);
         return;
     }

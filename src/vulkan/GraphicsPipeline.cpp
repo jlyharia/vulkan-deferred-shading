@@ -155,7 +155,7 @@ vk::Pipeline GraphicsPipeline::buildPipeline(const PipelineConfig &config,
     auto depthStencil = vk::PipelineDepthStencilStateCreateInfo()
                         .setDepthTestEnable(config.depthTestEnable)
                         .setDepthWriteEnable(config.depthWriteEnable)
-                        .setDepthCompareOp(vk::CompareOp::eLess)
+                        .setDepthCompareOp(vk::CompareOp::eGreater)
                         .setDepthBoundsTestEnable(false)
                         .setStencilTestEnable(false);
 

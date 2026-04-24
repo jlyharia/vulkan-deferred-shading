@@ -24,7 +24,7 @@ void DirShadowPass::execute(vk::CommandBuffer cmd,
         vk::ImageLayout::eDepthStencilAttachmentOptimal,
         vk::AttachmentLoadOp::eClear,
         vk::AttachmentStoreOp::eStore,
-        vk::ClearDepthStencilValue(1.0f, 0));
+        vk::ClearDepthStencilValue(0.0f, 0)); // reverse z
 
     vk::RenderingInfo renderingInfo{};
     renderingInfo.setRenderArea({{0, 0}, shadowMap_.getExtent()})
@@ -41,7 +41,7 @@ void DirShadowPass::execute(vk::CommandBuffer cmd,
         // constantFactor shifts all depths uniformly; slopeFactor scales with surface slope.
         // Tune these values if you see shadow acne or Peter Panning.
 
-        cmd.setDepthBias(1.25f, 0.0f, 1.75f);
+        cmd.setDepthBias(-1.25f, 0.0f, -1.75f); // reverse-Z: push stored depth toward 0 (far)
 
         const glm::mat4 lightSpace = dirLight.lightSpaceMatrix();
 
