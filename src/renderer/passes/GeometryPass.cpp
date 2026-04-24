@@ -31,7 +31,7 @@ void GeometryPass::execute(vk::CommandBuffer cmd,
         vk::ImageLayout::eDepthStencilAttachmentOptimal,
         vk::AttachmentLoadOp::eClear,
         vk::AttachmentStoreOp::eStore,
-        vk::ClearDepthStencilValue(1.0f, 0));
+        vk::ClearDepthStencilValue(0.0f, 0)); // reverse z
 
     vk::RenderingInfo renderingInfo{};
     renderingInfo.setRenderArea({{0, 0}, extent})
