@@ -31,6 +31,7 @@ Favor system-level insight (bandwidth, memory lifetime, GPU trade-offs) over vis
 | `GraphicsPipeline` | `pbrPipeline_` + `unlitPipeline_`, shared layout |
 | `Renderer` | Selects pipeline per `material.unlit`, manages draw loop |
 | `InstanceData` | Per-instance SSBO struct: mat4 + vec4 color (80 bytes, std430) |
+| `GpuTimestamps` | Double-buffered VkQueryPool pair; `writeBegin`/`writeEnd` bracket each pass; `readback` converts tick deltas → ms |
 
 ### Descriptor layout
 | Set | Binding | Type | Stage | Content |
@@ -52,7 +53,7 @@ src/
   assets/       — AssetManager, GltfLoader
   common/       — GPU structs, Config, enums
   external/     — VMA/vendor impl files
-  renderer/     — Renderer, UserInterface
+  renderer/     — Renderer, UserInterface, GpuTimestamps
     passes/     — ForwardPass, GeometryPass, LightingPass, OverlayPass, DirShadowPass, SsaoPass, SsaoBlurPass
       graph/    — RenderGraph, RGPass, RGTexture, RGTextureAccess, TextureState, CompiledPass
   scene/        — Camera, Mesh, MeshInstance, Texture, etc.
@@ -82,7 +83,7 @@ Frame-level DAG that owns barrier derivation. Wired into the render loop — `re
 | `TextureState` | Mutable tracking state during `compile()`: current layout/stage/access |
 | `CompiledPass` | Compile output: `RGPass` + pre-baked `vk::ImageMemoryBarrier2` list |
 
-`Renderer::recordCommandBuffer()` calls `renderGraph_->execute(cmd)`, then OverlayPass and ImGui outside the graph.
+`Renderer::recordCommandBuffer()` calls `renderGraph_->execute(cmd, gpuTimestamps_.get(), currentFrame)`, then OverlayPass (also timed) and ImGui outside the graph.
 
 ### Render loop
 1. `renderGraph_->execute(cmd)` — drives DirShadowPass, GeometryPass, SsaoPass, SsaoBlurPass, LightingPass with auto-derived barriers
@@ -105,6 +106,7 @@ Frame-level DAG that owns barrier derivation. Wired into the render loop — `re
 - Reversed-Z with infinite far plane ✓
 - SSAO at half resolution (16-sample kernel) ✓
 - Debug labels via `VK_EXT_debug_utils` — all graph passes + Overlay + ImGui labeled for RenderDoc/Nsight ✓
+- GPU timestamp queries per pass — `GpuTimestamps` double-buffered query pools, 1-second averaged ImGui table ✓
 
 ## Roadmap
 1. ~~Deferred rendering (G-buffer + lighting pass)~~ ✓
@@ -113,5 +115,5 @@ Frame-level DAG that owns barrier derivation. Wired into the render loop — `re
 4. ~~Render graph~~ ✓
 5. ~~Reversed Z + infinite far plane~~ ✓
 6. ~~Debug labels (RenderDoc/Nsight pass naming)~~ ✓
-7. GPU timestamp queries per pass
+7. ~~GPU timestamp queries per pass~~ ✓
 8. Technical README
