@@ -26,20 +26,21 @@ void SsaoPass::execute(vk::CommandBuffer cmd,
                        vk::DescriptorSet globalDescSet,
                        vk::DescriptorSet lightingInputsDescSet,
                        vk::DescriptorSet ssaoDescSet) const {
-    auto extent = swapChain_.getExtent();
+    auto fullExtent = swapChain_.getExtent();
+    vk::Extent2D halfExtent{fullExtent.width / 2, fullExtent.height / 2};
     const vk::PipelineLayout layout = pipeline.getPipelineLayout();
 
     auto colorAttachment = pass_util::colorAttachment(ssaoBuffer_.view,
                                                        vk::AttachmentLoadOp::eDontCare);
 
     vk::RenderingInfo renderingInfo{};
-    renderingInfo.setRenderArea({{0, 0}, extent})
+    renderingInfo.setRenderArea({{0, 0}, halfExtent})
                  .setLayerCount(1)
                  .setColorAttachments(colorAttachment);
 
     cmd.beginRendering(renderingInfo);
     {
-        pass_util::setViewportScissor(cmd, extent);
+        pass_util::setViewportScissor(cmd, halfExtent);
 
         cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getSsaoPipeline());
 
@@ -131,7 +132,7 @@ float SsaoPass::generateRandomFloat() {
 void SsaoPass::createImages(uint32_t width, uint32_t height) {
     constexpr auto usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
     ssaoBuffer_ = vk_util::AttachmentImage::create(context_.getVmaAllocator(), context_.getDevice(),
-                                                    width, height, SSAO_BUFFER_FORMAT, usage);
+                                                    width / 2, height / 2, SSAO_BUFFER_FORMAT, usage);
 }
 
 void SsaoPass::cleanup() {

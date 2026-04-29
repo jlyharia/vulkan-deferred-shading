@@ -409,4 +409,30 @@ void endSingleTimeCommands(vk::Device device,
     device.freeCommandBuffers(commandPool, commandBuffer);
 }
 
+// =============================================================================
+// Debug labels
+// =============================================================================
+static PFN_vkCmdBeginDebugUtilsLabelEXT pfnBeginLabel = nullptr;
+static PFN_vkCmdEndDebugUtilsLabelEXT   pfnEndLabel   = nullptr;
+
+void initDebugLabels(VkInstance instance) noexcept {
+    pfnBeginLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+        vkGetInstanceProcAddr(instance, "vkCmdBeginDebugUtilsLabelEXT"));
+    pfnEndLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+        vkGetInstanceProcAddr(instance, "vkCmdEndDebugUtilsLabelEXT"));
+}
+
+void cmdBeginLabel(vk::CommandBuffer cmd, std::string_view name) noexcept {
+    if (!pfnBeginLabel) return;
+    VkDebugUtilsLabelEXT info{};
+    info.sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    info.pLabelName = name.data();
+    pfnBeginLabel(cmd, &info);
+}
+
+void cmdEndLabel(vk::CommandBuffer cmd) noexcept {
+    if (!pfnEndLabel) return;
+    pfnEndLabel(cmd);
+}
+
 }

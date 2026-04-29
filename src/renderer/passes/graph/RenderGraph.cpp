@@ -5,6 +5,7 @@
 #include "RGTexture.hpp"
 #include "TextureState.hpp"
 #include "vulkan/VulkanUtils.hpp"
+#include <string_view>
 
 #include <cassert>
 #include <queue>
@@ -137,6 +138,8 @@ void RenderGraph::execute(const vk::CommandBuffer cmd) {
             cmd.pipelineBarrier2(vk::DependencyInfo{}.setImageMemoryBarriers(barriers));
         }
         assert(pass.execute && "RGPass registered without execute lambda");
+        vk_util::cmdBeginLabel(cmd, pass.name);
         pass.execute(cmd);
+        vk_util::cmdEndLabel(cmd);
     }
 }
