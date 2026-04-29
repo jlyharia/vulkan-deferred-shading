@@ -164,6 +164,7 @@ void App::mainLoop() {
         glfwPollEvents();
 
         updateFrameTime();
+        accumulateGpuTimings();
         processInput();
         update(deltaTime);
 
@@ -199,10 +200,7 @@ void App::renderUI() const {
 
     ImGui::End();
 
-    std::vector<UserInterface::GpuTimingEntry> timings;
-    for (auto &e : renderer_->gpuTimings())
-        timings.emplace_back(UserInterface::GpuTimingEntry{e.name, e.gpuMs});
-    userInterface_->drawGpuTimings(timings);
+    userInterface_->drawGpuTimings(avgGpuTimings_);
 }
 
 void App::drawFrame() {
@@ -228,6 +226,30 @@ void App::run() {
     initWindow();
     initVulkan();
     mainLoop();
+}
+
+void App::accumulateGpuTimings() {
+    const auto &timings = renderer_->gpuTimings();
+    if (timings.empty()) return;
+
+    if (gpuTimingAccum_.size() != timings.size()) {
+        gpuTimingAccum_.assign(timings.size(), 0.0f);
+        gpuTimingNames_.clear();
+        for (auto &e : timings) gpuTimingNames_.push_back(e.name);
+    }
+    for (size_t i = 0; i < timings.size(); ++i)
+        gpuTimingAccum_[i] += timings[i].gpuMs;
+    gpuTimingCount_++;
+    gpuTimer_ += deltaTime;
+
+    if (gpuTimer_ >= 1.0f && gpuTimingCount_ > 0) {
+        avgGpuTimings_.clear();
+        for (size_t i = 0; i < gpuTimingAccum_.size(); ++i)
+            avgGpuTimings_.push_back({gpuTimingNames_[i], gpuTimingAccum_[i] / gpuTimingCount_});
+        gpuTimingAccum_.assign(gpuTimingAccum_.size(), 0.0f);
+        gpuTimingCount_ = 0;
+        gpuTimer_       = 0.0f;
+    }
 }
 
 void App::updateFrameTime() {
