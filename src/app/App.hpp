@@ -4,8 +4,11 @@
 
 #pragma once
 #include "common/VulkanInclude.hpp"
+#include "renderer/UserInterface.hpp"
 #include <chrono>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "../scene/Camera.hpp"
 #include "assets/AssetManager.hpp"
@@ -15,7 +18,7 @@
 #include "scene/PointLight.hpp"
 #include "vulkan/VulkanContext.hpp"
 
-class UserInterface;
+// UserInterface included above (needed for GpuTimingEntry)
 class Renderer;
 class RenderPass;
 class GraphicsPipeline;
@@ -66,6 +69,7 @@ private:
     static void framebufferResizeCallback(GLFWwindow *window, int width, int height);
 
     void updateFrameTime();
+    void accumulateGpuTimings();
     void loadScene();
     void loadPointLights();
 
@@ -76,6 +80,13 @@ private:
     float frameTimeAccum_  = 0.0f;
     int   frameCount_      = 0;
     float avgFrameTimeMs_  = 0.0f;
+
+    // GPU pass timing averages (1-second flush, mirrors CPU frame time pattern)
+    std::vector<float>                           gpuTimingAccum_;
+    std::vector<std::string>                     gpuTimingNames_;
+    int                                          gpuTimingCount_ = 0;
+    float                                        gpuTimer_       = 0.0f;
+    std::vector<UserInterface::GpuTimingEntry>   avgGpuTimings_;
 
     bool framebufferResized_ = false;
 

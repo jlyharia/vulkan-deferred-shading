@@ -3,6 +3,7 @@
 //
 
 #include "Renderer.hpp"
+#include "GpuTimestamps.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -68,6 +69,7 @@ Renderer::~Renderer() {
     std::cerr << "[Destructor] Renderer starting..." << std::endl;
     vkDeviceWaitIdle(context_.getDevice());
 
+    gpuTimestamps_.reset(); // query pools must go before device
     // Destroy pass resources before pool (sets are freed when pool is destroyed)
     dirShadowPass_.reset();
     shadowMap_.reset();
@@ -166,8 +168,21 @@ void Renderer::initResources() {
     overlayPass_ = std::make_unique<OverlayPass>(swapChain_);
     renderGraph_ = std::make_unique<RenderGraph>();
     rebuildRenderGraph();
+    gpuTimestamps_ = std::make_unique<GpuTimestamps>(
+        context_.getDevice(), context_.getPhysicalDevice());
 }
 
+
+std::vector<std::string> Renderer::buildPassNameList() const {
+    auto names = renderGraph_->passNames();
+    names.push_back("Overlay");
+    return names;
+}
+
+const std::vector<GpuTimestamps::Entry> &Renderer::gpuTimings() const {
+    static const std::vector<GpuTimestamps::Entry> empty{};
+    return gpuTimestamps_ ? gpuTimestamps_->results() : empty;
+}
 
 // Texture names used in both registerTexture() and per-pass read/write declarations.
 // Centralised here so a typo causes a compile error rather than a silent graph mis-wire.
@@ -339,13 +354,16 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
     {
         prepareFrameImages(cmd, imageIndex);
 
-        renderGraph_->execute(cmd);
+        renderGraph_->execute(cmd, gpuTimestamps_.get(), currentFrame);
 
         // Overlay runs after the graph: depth is already eDepthReadOnlyOptimal (Lighting declared it),
         // swapchain color has Lighting's output. Overlay eLoads both — no barriers needed.
+        const uint32_t overlaySlot = renderGraph_->passCount();
         vk_util::cmdBeginLabel(cmd, "Overlay");
+        if (gpuTimestamps_) gpuTimestamps_->writeBegin(cmd, currentFrame, overlaySlot);
         overlayPass_->execute(cmd, *graphicsPipeline_, imageIndex,
                               descriptorSets_[currentFrame], sphereMesh_, currentInstanceCount_);
+        if (gpuTimestamps_) gpuTimestamps_->writeEnd(cmd, currentFrame, overlaySlot);
         vk_util::cmdEndLabel(cmd);
 
         // UI pass (ImGui handles its own begin/endRendering)
@@ -451,6 +469,17 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
 
     // 4. Reset Fence and Record Commands
     device.resetFences(inFlightFences_[currentFrame]);
+
+    // Read back GPU timestamps written by the previous submission of this frame slot.
+    // Skip the first MAX_FRAMES_IN_FLIGHT frames: the pools haven't been written yet.
+    if (gpuTimestamps_) {
+        if (frameCount_ >= engineConfig::MAX_FRAMES_IN_FLIGHT) {
+            const auto names = buildPassNameList();
+            gpuTimestamps_->readback(currentFrame, names, static_cast<uint32_t>(names.size()));
+        }
+        gpuTimestamps_->resetPool(currentFrame);
+    }
+    ++frameCount_;
 
     updateUniformBuffer(currentFrame, camera, pointLights, dirLight);
     const uint32_t instanceCount = updateInstanceBuffer(currentFrame, meshInstances);

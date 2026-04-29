@@ -6,10 +6,11 @@
 #include "common/VulkanInclude.hpp"
 
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
-
+class GpuTimestamps;
 
 /**
  * owns the registry and passes, runs compile and execute.
@@ -20,8 +21,16 @@ public:
     void registerTexture(RGTexture tex);
 
     void compile(); // topo sort + derive barrier list per pass
-    void execute(vk::CommandBuffer cmd);
+    void execute(vk::CommandBuffer cmd, GpuTimestamps *timestamps = nullptr, uint32_t frameIndex = 0);
     void reset();  // clear passes and registry before rebuilding each frame
+
+    [[nodiscard]] uint32_t passCount() const { return static_cast<uint32_t>(compiledPass.size()); }
+    [[nodiscard]] std::vector<std::string> passNames() const {
+        std::vector<std::string> names;
+        names.reserve(compiledPass.size());
+        for (auto &[pass, _] : compiledPass) names.push_back(pass.name);
+        return names;
+    }
 
 private:
     std::unordered_map<std::string, RGTexture> textureRegistry;

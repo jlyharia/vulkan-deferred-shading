@@ -176,6 +176,7 @@ void VulkanContext::createLogicalDevice() {
 
     vk::PhysicalDeviceVulkan12Features features12;
     features12.setBufferDeviceAddress(true)
+              .setHostQueryReset(true)
               .setPNext(&features13);
 
     vk::PhysicalDeviceFeatures deviceFeatures{};
