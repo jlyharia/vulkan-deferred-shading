@@ -343,11 +343,15 @@ void Renderer::recordCommandBuffer(const vk::CommandBuffer cmd,
 
         // Overlay runs after the graph: depth is already eDepthReadOnlyOptimal (Lighting declared it),
         // swapchain color has Lighting's output. Overlay eLoads both — no barriers needed.
+        vk_util::cmdBeginLabel(cmd, "Overlay");
         overlayPass_->execute(cmd, *graphicsPipeline_, imageIndex,
                               descriptorSets_[currentFrame], sphereMesh_, currentInstanceCount_);
+        vk_util::cmdEndLabel(cmd);
 
         // UI pass (ImGui handles its own begin/endRendering)
+        vk_util::cmdBeginLabel(cmd, "ImGui");
         userInterface.recordCommands(cmd, imageIndex);
+        vk_util::cmdEndLabel(cmd);
 
         finalizeFrameImages(cmd, imageIndex);
     }

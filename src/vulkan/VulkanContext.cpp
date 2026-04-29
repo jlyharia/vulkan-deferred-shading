@@ -2,6 +2,7 @@
 #include "common/VulkanInclude.hpp"
 #include "Validation.hpp"
 #include "SwapChain.hpp"
+#include "VulkanUtils.hpp"
 #include "common/Config.hpp"
 
 #include <iostream>
@@ -109,6 +110,7 @@ void VulkanContext::createInstance() {
 
     // 3. Create the instance
     instance_ = vk::createInstance(createInfo);
+    vk_util::initDebugLabels(instance_);
 }
 
 void VulkanContext::pickPhysicalDevice() {

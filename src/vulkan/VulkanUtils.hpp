@@ -188,5 +188,13 @@ void uploadToDeviceBuffer(
     vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
 }
 
+// =============================================================================
+// Debug labels — RenderDoc / Nsight pass naming via VK_EXT_debug_utils.
+// Call initDebugLabels() once after instance creation. cmdBeginLabel /
+// cmdEndLabel are no-ops when the extension is not available.
+// =============================================================================
+void initDebugLabels(VkInstance instance) noexcept;
+void cmdBeginLabel(vk::CommandBuffer cmd, std::string_view name) noexcept;
+void cmdEndLabel(vk::CommandBuffer cmd) noexcept;
 
 }

@@ -68,11 +68,11 @@ Each pass is a plain struct with an `execute(vk::CommandBuffer, ...)` method. No
 | `LightingPass` | LightingPass.hpp/cpp | Fullscreen BRDF triangle, writes to swapchain |
 | `OverlayPass` | OverlayPass.hpp/cpp | Light sphere visualization (depth-test-read-only) |
 | `DirShadowPass` | DirShadowPass.hpp/cpp | Renders scene from light POV into shadow map depth image; barriers to shader-read |
-| `SsaoPass` | SsaoPass.hpp/cpp | SSAO occlusion factor into R8Unorm RT; owns noise texture + kernel buffer |
-| `SsaoBlurPass` | SsaoBlurPass.hpp/cpp | Bilateral blur over the SSAO buffer |
+| `SsaoPass` | SsaoPass.hpp/cpp | SSAO occlusion at half resolution (width/2 × height/2), 16-sample kernel; owns noise texture + kernel buffer |
+| `SsaoBlurPass` | SsaoBlurPass.hpp/cpp | Bilateral blur over the half-res SSAO buffer |
 
 ### Render graph (`src/renderer/passes/graph/`)
-Frame-level DAG that owns barrier derivation. Not yet wired into the render loop — under construction.
+Frame-level DAG that owns barrier derivation. Wired into the render loop — `renderGraph_->execute(cmd)` is the primary draw call in `recordCommandBuffer()`.
 | Type | Role |
 |------|------|
 | `RenderGraph` | Owns texture registry + pass list; runs `compile()` then `execute()` each frame |
@@ -82,19 +82,14 @@ Frame-level DAG that owns barrier derivation. Not yet wired into the render loop
 | `TextureState` | Mutable tracking state during `compile()`: current layout/stage/access |
 | `CompiledPass` | Compile output: `RGPass` + pre-baked `vk::ImageMemoryBarrier2` list |
 
-`Renderer::renderDeferred()` is a thin 3-line orchestrator calling the deferred passes.
-`Renderer::recordCommandBuffer()` dispatches to `forwardPass_->execute()` or `renderDeferred()`.
+`Renderer::recordCommandBuffer()` calls `renderGraph_->execute(cmd)`, then OverlayPass and ImGui outside the graph.
 
-### Render loop (Forward path)
-1. Non-instanced pass — all objects except spheres, push constants, PBR or unlit pipeline
-2. Instanced pass — spheres only, bind vertex buffer + unlit pipeline, one draw call
+### Render loop
+1. `renderGraph_->execute(cmd)` — drives DirShadowPass, GeometryPass, SsaoPass, SsaoBlurPass, LightingPass with auto-derived barriers
+2. OverlayPass — instanced light spheres with depth test (read-only), runs after graph
+3. ImGui UI pass
 
-### Render loop (Deferred path)
-1. GeometryPass — fill albedo+metallic RT, normal+roughness RT, depth; barrier → shader-read
-2. LightingPass — fullscreen Cook-Torrance BRDF triangle into swapchain
-3. OverlayPass — instanced light spheres with depth test (read-only), no depth write
-
-## Current State (2026-04-21)
+## Current State (2026-04-28)
 - PBR Cook-Torrance BRDF ✓
 - Deferred rendering (G-buffer + lighting pass) ✓
 - Point lights in GlobalUBO ✓
@@ -103,16 +98,20 @@ Frame-level DAG that owns barrier derivation. Not yet wired into the render loop
 - All files PascalCase ✓
 - Pass extraction into `src/renderer/passes/` ✓
 - `src/assets/` (was `core/` + `system/`) ✓
-- `RenderPath::ForwardPlus` added to Config.hpp ✓
 - Directional shadow map with PCF hardware filtering ✓
 - SSAO with bilateral blur pass ✓
-- Render graph skeleton (`passes/graph/`) — compile/barrier derivation done, not yet wired into render loop (in progress)
+- Render graph with compile-time barrier derivation — wired into render loop ✓
 - Tone mapping: ACES (Narkowicz 2015 fitted curve) active; Reinhard commented out in `lighting.frag`
+- Reversed-Z with infinite far plane ✓
+- SSAO at half resolution (16-sample kernel) ✓
+- Debug labels via `VK_EXT_debug_utils` — all graph passes + Overlay + ImGui labeled for RenderDoc/Nsight ✓
 
 ## Roadmap
 1. ~~Deferred rendering (G-buffer + lighting pass)~~ ✓
-2. Depth reconstruct
-3. ~~Shadow maps~~ ✓
-4. Render graph (in progress)
-5. Reversed Z + infinite far plane
-6. ~~SSAO~~ ✓
+2. ~~Shadow maps~~ ✓
+3. ~~SSAO~~ ✓
+4. ~~Render graph~~ ✓
+5. ~~Reversed Z + infinite far plane~~ ✓
+6. ~~Debug labels (RenderDoc/Nsight pass naming)~~ ✓
+7. GPU timestamp queries per pass
+8. Technical README

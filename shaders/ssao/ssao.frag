@@ -25,7 +25,7 @@ layout (set = 2, binding = 2) uniform sampler2D gbDepth;
 
 
 layout (set = 3, binding = 0) uniform SSAOKernelUBO {
-    vec4 samples[64];
+    vec4 samples[16];
 } kernel;
 
 layout (set = 3, binding = 1) uniform sampler2D SSAONoise;
@@ -60,7 +60,7 @@ void main() {
     mat3 TBN = mat3(tangent, bitangent, normalInView);
     vec3 actualPosInView = reconstructViewPos(inUV, texture(gbDepth, inUV).r);
     float occlusion = 0.0f;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < 16; i++) {
         vec3 dirVec = TBN * kernel.samples[i].xyz;
         vec3 samplePosInView = actualPosInView + dirVec * radius;
         vec4 offset = ubo.proj * vec4(samplePosInView, 1.0);
@@ -76,7 +76,7 @@ void main() {
         occlusion += (offsetViewPos.z - samplePosInView.z > bias ? 1.0 : 0.0) * rangeCheck;
     }
     // occlusion factor, the smaller, the more occlude it get
-    float occlusionFactor = 1.0 - occlusion / 64.0;
+    float occlusionFactor = 1.0 - occlusion / 16.0;
     //    outColor = vec4(vec3(occlusionFactor), 1.0);
     outColor = occlusionFactor;
 }

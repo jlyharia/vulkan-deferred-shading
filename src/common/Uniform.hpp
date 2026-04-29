@@ -21,7 +21,7 @@ struct GlobalUBO {
     alignas(16) PointLight pointLights[24];     // matches GLSL std140
 };
 
-inline constexpr uint32_t SSAO_KERNEL_SIZE = 64;
+inline constexpr uint32_t SSAO_KERNEL_SIZE = 16;
 
 struct SSAOKernelUBO {
     alignas(16) glm::vec4 samples[SSAO_KERNEL_SIZE];
