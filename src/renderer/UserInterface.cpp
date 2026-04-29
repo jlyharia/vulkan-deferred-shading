@@ -137,6 +137,29 @@ void UserInterface::createDescriptorPool() {
     imguiPool_ = context_.getDevice().createDescriptorPool(poolInfo);
 }
 
+void UserInterface::drawGpuTimings(const std::vector<GpuTimingEntry> &entries) {
+    ImGui::Begin("GPU Pass Timings");
+    if (ImGui::BeginTable("timings", 2,
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
+    {
+        ImGui::TableSetupColumn("Pass",   ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableHeadersRow();
+        float total = 0.0f;
+        for (auto &e : entries) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(e.name.c_str());
+            ImGui::TableSetColumnIndex(1); ImGui::Text("%.3f", e.gpuMs);
+            total += e.gpuMs;
+        }
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted("Total");
+        ImGui::TableSetColumnIndex(1); ImGui::Text("%.3f", total);
+        ImGui::EndTable();
+    }
+    ImGui::End();
+}
+
 void UserInterface::drawCameraSettings(Camera &camera) {
     ImGui::Begin("Camera Controller");
 

@@ -1,5 +1,6 @@
 #include "RenderGraph.hpp"
 
+#include "renderer/GpuTimestamps.hpp"
 #include "CompiledPass.hpp"
 #include "RGPass.hpp"
 #include "RGTexture.hpp"
@@ -132,14 +133,18 @@ void RenderGraph::reset() {
     compiledPass.clear();
 }
 
-void RenderGraph::execute(const vk::CommandBuffer cmd) {
+void RenderGraph::execute(const vk::CommandBuffer cmd, GpuTimestamps *timestamps, uint32_t frameIndex) {
+    uint32_t passIdx = 0;
     for (auto &[pass, barriers] : compiledPass) {
         if (!barriers.empty()) {
             cmd.pipelineBarrier2(vk::DependencyInfo{}.setImageMemoryBarriers(barriers));
         }
         assert(pass.execute && "RGPass registered without execute lambda");
         vk_util::cmdBeginLabel(cmd, pass.name);
+        if (timestamps) timestamps->writeBegin(cmd, frameIndex, passIdx);
         pass.execute(cmd);
+        if (timestamps) timestamps->writeEnd(cmd, frameIndex, passIdx);
         vk_util::cmdEndLabel(cmd);
+        ++passIdx;
     }
 }

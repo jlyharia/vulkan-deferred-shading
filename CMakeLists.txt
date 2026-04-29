@@ -68,6 +68,8 @@ add_executable(${TARGET_NAME}
         src/scene/Camera.hpp
         src/renderer/UserInterface.cpp
         src/renderer/UserInterface.hpp
+        src/renderer/GpuTimestamps.cpp
+        src/renderer/GpuTimestamps.hpp
         src/common/VulkanInclude.hpp
         # Now these variables are guaranteed to be populated
         "${IMGUI_BACKEND_SRC_DIR}/imgui_impl_glfw.cpp"

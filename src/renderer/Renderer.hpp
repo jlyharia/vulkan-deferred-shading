@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "common/Config.hpp"
+#include "renderer/GpuTimestamps.hpp"
 
 class RenderGraph;
 class SsaoBlurPass;
@@ -68,6 +69,8 @@ public:
 
     [[nodiscard]] GBuffer &getGBuffer() const { return *gbuffer_; }
 
+    [[nodiscard]] const std::vector<GpuTimestamps::Entry> &gpuTimings() const;
+
     vk::DescriptorSet createTextureDescriptorSet(
         vk::ImageView imageView,
         vk::ImageView normalView,
@@ -108,6 +111,7 @@ private:
     void updateSsaoDescriptorSets();
     void updateSsaoBlurDescriptorSet();
     void rebuildRenderGraph(); // image/view handles change after swapchain or G-buffer recreation, so the graph must be rebuilt
+    [[nodiscard]] std::vector<std::string> buildPassNameList() const;
 
     // --- Members ---
     VulkanContext &context_;
@@ -165,6 +169,8 @@ private:
     std::unique_ptr<LightingPass> lightingPass_;
     std::unique_ptr<OverlayPass> overlayPass_;
     std::unique_ptr<RenderGraph> renderGraph_;
+    std::unique_ptr<GpuTimestamps> gpuTimestamps_;
+    uint32_t frameCount_ = 0;
 
     Material defaultMaterial;
 

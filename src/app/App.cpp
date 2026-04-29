@@ -198,6 +198,11 @@ void App::renderUI() const {
     ImGui::PlotLines("Latency", history, 60, offset, nullptr, 0.0f, 33.3f, ImVec2(0, 50));
 
     ImGui::End();
+
+    std::vector<UserInterface::GpuTimingEntry> timings;
+    for (auto &e : renderer_->gpuTimings())
+        timings.emplace_back(UserInterface::GpuTimingEntry{e.name, e.gpuMs});
+    userInterface_->drawGpuTimings(timings);
 }
 
 void App::drawFrame() {
