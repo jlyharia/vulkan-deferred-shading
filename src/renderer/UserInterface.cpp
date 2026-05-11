@@ -142,8 +142,8 @@ void UserInterface::drawGpuTimings(const std::vector<GpuTimingEntry> &entries) {
     if (ImGui::BeginTable("timings", 2,
         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
     {
-        ImGui::TableSetupColumn("Pass",   ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableSetupColumn("Pass",   ImGuiTableColumnFlags_WidthFixed, 300.0f);
+        ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         float total = 0.0f;
         for (auto &e : entries) {
