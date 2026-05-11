@@ -90,7 +90,7 @@ Frame-level DAG that owns barrier derivation. Wired into the render loop — `re
 2. OverlayPass — instanced light spheres with depth test (read-only), runs after graph
 3. ImGui UI pass
 
-## Current State (2026-04-28)
+## Current State (2026-05-02)
 - PBR Cook-Torrance BRDF ✓
 - Deferred rendering (G-buffer + lighting pass) ✓
 - Point lights in GlobalUBO ✓
