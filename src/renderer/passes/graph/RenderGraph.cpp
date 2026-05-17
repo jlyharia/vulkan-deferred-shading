@@ -120,7 +120,7 @@ const {
                    .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
                    .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
                    .setImage(tex.image)
-                   .setSubresourceRange({aspect, 0, 1, 0, 1});
+                   .setSubresourceRange({aspect, 0, vk::RemainingMipLevels, 0, vk::RemainingArrayLayers});
 
     cur = {tAccess.layout, tAccess.stage, tAccess.access};
     // update reference in textureStateMap so next pass will see updated state

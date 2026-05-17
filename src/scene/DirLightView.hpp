@@ -5,17 +5,23 @@
 #pragma once
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <array>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include "common/Config.hpp"
 
-/// Directional light parameters and light-space matrix computation.
-/// position + target define the light's view; orthoSize, nearPlane, farPlane define the shadow frustum.
+struct CascadeData {
+    glm::mat4 lightSpaceMatrix;
+    float splitDepth;  // positive distance from camera — far plane of this cascade
+};
+
+/// Directional light parameters and per-cascade light-space matrix computation.
+/// position + target define the light's view direction.
+/// shadowFar is the outermost cascade distance (metres from camera), independent of the camera's infinite far plane.
 struct DirLightView {
     glm::vec3 position = glm::vec3(10.0f, 10.0f, 20.0f);
     glm::vec3 target = glm::vec3(0.0f);
-    float orthoSize = 20.0f; // half-width/height of the ortho frustum
-    float nearPlane = 0.1f;
-    float farPlane = 100.0f;
+    float shadowFar = 200.0f;
 
     [[nodiscard]] glm::mat4 viewMatrix() const {
         glm::vec3 dir = glm::normalize(target - position);
@@ -25,14 +31,11 @@ struct DirLightView {
         return glm::lookAt(position, target, up);
     }
 
-    [[nodiscard]] glm::mat4 projMatrix() const {
-        glm::mat4 proj = glm::orthoRH_ZO(-orthoSize, orthoSize, -orthoSize, orthoSize, nearPlane, farPlane);
-        proj[1][1] *= -1; // Vulkan Y-flip
-        glm::mat4 reverseZ = glm::mat4(1.0f);
-        reverseZ[2][2] = -1.0f;
-        reverseZ[3][2] = 1.0f;
-        return reverseZ * proj;
-    }
-
-    [[nodiscard]] glm::mat4 lightSpaceMatrix() const { return projMatrix() * viewMatrix(); }
+    /// Computes per-cascade light-space matrices and split depths.
+    /// cameraProj must be the camera's projection matrix (used to extract FOV and near plane).
+    /// lambda blends log splits (1.0) vs uniform splits (0.0); 0.9 works well in practice.
+    [[nodiscard]] std::array<CascadeData, engineConfig::NUM_CASCADES> computeCascades(
+        const glm::mat4 &cameraView,
+        const glm::mat4 &cameraProj,
+        float lambda = 0.9f) const;
 };

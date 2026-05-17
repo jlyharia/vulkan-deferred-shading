@@ -6,7 +6,6 @@
 
 #include "PassUtils.hpp"
 #include "common/PushConstantConstant.hpp"
-#include "scene/DirLightView.hpp"
 #include "scene/Mesh.hpp"
 #include "vulkan/GraphicsPipeline.hpp"
 #include "vulkan/ShadowMap.hpp"
@@ -18,32 +17,28 @@ DirShadowPass::DirShadowPass(ShadowMap &shadowMap) : shadowMap_(shadowMap) {
 void DirShadowPass::execute(vk::CommandBuffer cmd,
                             const GraphicsPipeline &pipeline,
                             const std::vector<MeshInstance> &meshInstances,
-                            const DirLightView &dirLight) const {
-    auto depthAttach = pass_util::depthAttachment(
-        shadowMap_.getDepthView(),
-        vk::ImageLayout::eDepthStencilAttachmentOptimal,
-        vk::AttachmentLoadOp::eClear,
-        vk::AttachmentStoreOp::eStore,
-        vk::ClearDepthStencilValue(0.0f, 0)); // reverse z
+                            const std::array<CascadeData, engineConfig::NUM_CASCADES> &cascades) const {
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getDirShadowPipeline());
 
-    vk::RenderingInfo renderingInfo{};
-    renderingInfo.setRenderArea({{0, 0}, shadowMap_.getExtent()})
-                 .setLayerCount(1)
-                 .setPDepthAttachment(&depthAttach);
+    // Depth bias: pushes shadow map depth slightly away from the surface to prevent self-shadowing.
+    // constantFactor shifts all depths uniformly; slopeFactor scales with surface slope.
+    cmd.setDepthBias(-1.25f, 0.0f, -1.75f); // reverse-Z: push stored depth toward 0 (far)
 
-    cmd.beginRendering(renderingInfo);
-    {
+    for (int c = 0; c < engineConfig::NUM_CASCADES; c++) {
+        auto depthAttach = pass_util::depthAttachment(
+            shadowMap_.getLayerView(c),
+            vk::ImageLayout::eDepthStencilAttachmentOptimal,
+            vk::AttachmentLoadOp::eClear,
+            vk::AttachmentStoreOp::eStore,
+            vk::ClearDepthStencilValue(0.0f, 0)); // reverse-Z clear
+
+        vk::RenderingInfo renderingInfo{};
+        renderingInfo.setRenderArea({{0, 0}, shadowMap_.getExtent()})
+                     .setLayerCount(1)
+                     .setPDepthAttachment(&depthAttach);
+
+        cmd.beginRendering(renderingInfo);
         pass_util::setViewportScissor(cmd, shadowMap_.getExtent());
-
-        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getDirShadowPipeline());
-
-        // Depth bias: pushes shadow map depth slightly away from the surface to prevent self-shadowing.
-        // constantFactor shifts all depths uniformly; slopeFactor scales with surface slope.
-        // Tune these values if you see shadow acne or Peter Panning.
-
-        cmd.setDepthBias(-1.25f, 0.0f, -1.75f); // reverse-Z: push stored depth toward 0 (far)
-
-        const glm::mat4 lightSpace = dirLight.lightSpaceMatrix();
 
         for (const auto &[mesh, transform, name, color] : meshInstances) {
             if (!mesh)
@@ -54,8 +49,8 @@ void DirShadowPass::execute(vk::CommandBuffer cmd,
             cmd.bindIndexBuffer(mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
 
             DirShadowDataConstants constants{
-                .lightSpaceMatrix = lightSpace,
-                .model = transform.modelMatrix
+                .lightSpaceMatrix = cascades[c].lightSpaceMatrix,
+                .model = transform.modelMatrix,
             };
             cmd.pushConstants<DirShadowDataConstants>(
                 pipeline.getDirShadowPipelineLayout(),
@@ -66,6 +61,6 @@ void DirShadowPass::execute(vk::CommandBuffer cmd,
                 cmd.drawIndexed(submesh.indexCount, 1, submesh.firstIndex, 0, 0);
             }
         }
+        cmd.endRendering();
     }
-    cmd.endRendering();
 }

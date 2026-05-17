@@ -178,6 +178,7 @@ private:
     const GraphicsPipeline          *graphicsPipeline_     = nullptr;
     const std::vector<MeshInstance> *meshInstances_        = nullptr;
     const DirLightView              *dirLight_             = nullptr;
+    const Camera                    *camera_               = nullptr;
     uint32_t                         currentImageIndex_    = 0;
     uint32_t                         currentInstanceCount_ = 0;
 };

@@ -3,10 +3,14 @@
 //
 
 #pragma once
+#include <cstdint>
+#include "VulkanInclude.hpp"
 
 namespace engineConfig {
 // We use 'inline' so it can be included in multiple files without linker errors
 inline constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+inline constexpr int NUM_CASCADES = 4;
+inline constexpr int SHADOW_MAP_SIZE = 2048;
 
 // You can also put other engine-wide settings here later
 inline constexpr bool ENABLE_VALIDATION_LAYERS = true;

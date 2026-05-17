@@ -258,7 +258,11 @@ void Renderer::rebuildRenderGraph() {
             .access = Access::eDepthStencilAttachmentWrite,
         }},
         .execute = [this](vk::CommandBuffer cmd) {
-            dirShadowPass_->execute(cmd, *graphicsPipeline_, *meshInstances_, *dirLight_);
+            float aspect = swapChain_.getExtent().width / (float)swapChain_.getExtent().height;
+            auto cascades = dirLight_->computeCascades(
+                camera_->getViewMatrix(),
+                camera_->getProjectionMatrix(aspect));
+            dirShadowPass_->execute(cmd, *graphicsPipeline_, *meshInstances_, cascades);
         },
     });
 
@@ -487,6 +491,7 @@ void Renderer::drawFrame(const GraphicsPipeline &graphicsPipeline,
     graphicsPipeline_     = &graphicsPipeline;
     meshInstances_        = &meshInstances;
     dirLight_             = &dirLight;
+    camera_               = &camera;
     currentImageIndex_    = imageIndex;
     currentInstanceCount_ = instanceCount;
 
@@ -636,7 +641,11 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera &camera,
     ubo.invView = glm::inverse(ubo.view);
     ubo.invProj = glm::inverse(ubo.proj);
     ubo.cameraPos = glm::vec4(camera.position, 0.0f);
-    ubo.dirLightSpaceMatrix = dirLight.lightSpaceMatrix();
+    auto cascades = dirLight.computeCascades(ubo.view, ubo.proj);
+    for (int i = 0; i < engineConfig::NUM_CASCADES; i++) {
+        ubo.dirLightSpaceMatrices[i]  = cascades[i].lightSpaceMatrix;
+        ubo.cascadeSplitDepths[i]     = cascades[i].splitDepth;
+    }
     ubo.dirLightDir = glm::vec4(glm::normalize(dirLight.target - dirLight.position), 0.0f);
 
     const size_t count = std::min(pointLights.size(), size_t{24});
@@ -924,10 +933,7 @@ void Renderer::createDescriptorSetLayout() {
             // Binding 3: SSAO blurred result
             vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
-            // Binding 4: Directional shadow map
-            // vk::DescriptorSetLayoutBinding(4, vk::DescriptorType::eCombinedImageSampler, 1,
-            //                                vk::ShaderStageFlagBits::eFragment),
-            // Binding 4: Directional shadow map with hardware PCF
+            // Binding 4: CSM shadow map array (sampler2DArrayShadow, hardware PCF)
             vk::DescriptorSetLayoutBinding(4, vk::DescriptorType::eCombinedImageSampler, 1,
                                            vk::ShaderStageFlagBits::eFragment),
         };

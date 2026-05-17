@@ -3,25 +3,24 @@
 //
 
 #pragma once
+#include <array>
+#include "common/Config.hpp"
 #include "common/VulkanInclude.hpp"
+#include "scene/DirLightView.hpp"
 #include "scene/MeshInstance.hpp"
-#include <memory>
 #include <vector>
 
 class GraphicsPipeline;
 class ShadowMap;
-class Mesh;
-struct DirLightView;
 
 struct DirShadowPass {
     explicit DirShadowPass(ShadowMap &shadowMap);
 
-    /// Renders all mesh instances into the shadow map depth image from the light's POV,
-    /// then issues the depth-attachment → shader-read barrier for the lighting pass.
+    /// Renders all mesh instances into each cascade layer of the shadow map depth array image.
     void execute(vk::CommandBuffer cmd,
                  const GraphicsPipeline &pipeline,
                  const std::vector<MeshInstance> &meshInstances,
-                 const DirLightView &dirLight) const;
+                 const std::array<CascadeData, engineConfig::NUM_CASCADES> &cascades) const;
 
 private:
     ShadowMap &shadowMap_;
