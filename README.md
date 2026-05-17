@@ -20,6 +20,10 @@ A Vulkan 1.3 deferred shading renderer built from scratch in C++23. Five render 
 |---|---|
 | ![blur on](demo/ssaoblur/ssaoOutput_with_blur.jpg) | ![blur off](demo/ssaoblur/ssaoOutput_without_blur.jpg) |
 
+| CSM (4 cascades, PCF) | Cascade debug tint |
+|---|---|
+| ![csm](demo/csm/csm_shadow_move1.webp) | ![cascade tint](demo/csm/csm_shadow_move2.webp) |
+
 ---
 
 ## Architecture
@@ -78,9 +82,32 @@ Cook-Torrance BRDF in `lighting.frag` for 24 point lights + 1 directional light:
 
 ---
 
-### Shadow Mapping
+### Cascaded Shadow Maps
 
-Single directional shadow map with hardware PCF. `sampler2DShadow` with `VK_COMPARE_OP_LESS_OR_EQUAL` enables bilinear-filtered percentage-closer filtering on the texture unit — a 2×2 kernel tap per sample, paid for with a single texture fetch. A manual PCF loop in the shader costs additional fetches for the same kernel size and is less cache-friendly.
+A single 2048×2048 shadow map covers the entire scene with uniform texel density — wasteful close up, too coarse at distance. CSM fixes this by splitting the camera frustum into 4 depth bands (cascades) and fitting a separate orthographic projection to each. Close cascades get dense coverage where the eye resolves shadow edges; far cascades get coarser coverage where it doesn't matter.
+
+**Frustum splitting.** The Practical Split Scheme blends a logarithmic split (biased toward near) with a uniform split via a `lambda` factor (0.9). This produces splits roughly like 0.1 m → 5 m → 20 m → 60 m → 200 m, with the renderer using a separate `shadowFar` knob independent of the camera's infinite far plane.
+
+**Per-cascade ortho fitting.** For each split band, 8 view-space frustum corners are unprojected to world space and transformed into light space. Their AABB gives the orthographic bounds. Reverse-Z is preserved end-to-end: the light projection applies the same `[0,1]→[1,0]` remap as the camera, and the shadow sampler uses `VK_COMPARE_OP_GREATER_OR_EQUAL`.
+
+**Shadow swimming and the bounding-sphere fix.** The first working version used AABB texel snapping: compute texel size as `AABB_width / MAP_SIZE`, snap the AABB center to the nearest texel boundary. This worked for camera translation but broke when the camera rotated: the AABB changes shape as the frustum rotates in light space, so `AABB_width` changes every frame, the snap grid shifts, and shadows visibly crawl across geometry.
+
+The fix is to replace the AABB with a bounding sphere of the 8 sub-frustum corners. The sphere radius is rotationally invariant — it doesn't change when the camera looks around — so `texelSize = 2r / MAP_SIZE` is constant. The XY ortho bounds become `[center ± r]` in each axis (a slightly oversized but stable frustum), and the snap grid is stable regardless of camera orientation.
+
+```
+// AABB approach — broken under camera rotation
+float texelX = (maxB.x - minB.x) / SHADOW_MAP_SIZE;   // changes every frame
+float cx     = floor(center.x / texelX) * texelX;      // unstable grid → swimming
+
+// Bounding sphere — rotation-invariant
+float radius   = max corner distance from frustum centroid;
+float texelSize = 2.0f * radius / SHADOW_MAP_SIZE;     // constant
+float cx        = floor(center.x / texelSize) * texelSize;  // stable grid
+```
+
+**Cascade selection in the shader.** `fragDist = -viewPos.z` gives a positive linear depth from the camera. The first cascade whose far plane exceeds `fragDist` wins. The shadow map is a `sampler2DArrayShadow` (a single 2048×2048×4 image array); the selected cascade index becomes the `.z` component of the `texture()` lookup, so hardware PCF runs on the correct layer with one call.
+
+**Descriptor.** Binding 4 of set 2 uses the `e2DArray` view of the depth image with `compareEnable=true` and `VK_COMPARE_OP_GREATER_OR_EQUAL`. The descriptor type stays `eCombinedImageSampler`; only the image view and sampler change relative to the old single-layer setup.
 
 ---
 
@@ -143,7 +170,7 @@ ImGui pass   (performance monitor, camera controls, GPU pass timing table)
 
 | Pass | Inputs | Output | Notes |
 |------|--------|--------|-------|
-| DirShadowPass | Scene geometry | Shadow depth map | Rendered from light POV |
+| DirShadowPass | Scene geometry | Shadow depth array (4 layers) | 4 cascade renders, distinct array layers, no inter-cascade barriers |
 | GeometryPass | Scene geometry | RT0, RT1, depth | G-buffer fill |
 | SsaoPass | Depth, normals, noise, kernel | Half-res SSAO (R8) | 16-sample hemisphere |
 | SsaoBlurPass | Half-res SSAO, depth | Blurred SSAO | Bilateral (edge-preserving) |

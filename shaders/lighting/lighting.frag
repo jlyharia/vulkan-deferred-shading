@@ -1,5 +1,8 @@
 #version 450
 
+#define NUM_CASCADES 4
+//#define DEBUG_CASCADES  // uncomment to tint each cascade a distinct color
+
 layout (location = 0) in vec2 inUV;
 layout (location = 0) out vec4 outColor;
 
@@ -15,7 +18,8 @@ layout (set = 0, binding = 0) uniform GlobalUBO {
     mat4 invView;
     mat4 invProj;
     vec4 cameraPos;
-    mat4 dirLightSpaceMatrix;
+    mat4 dirLightSpaceMatrices[NUM_CASCADES]; // 4 × (light proj * view) for CSM
+    vec4 cascadeSplitDepths;                  // x,y,z,w = cascade far distances (positive metres from camera)
     vec4 dirLightDir;
     PointLight pointLights[24];
 } ubo;
@@ -25,7 +29,7 @@ layout (set = 2, binding = 0) uniform sampler2D gbAlbedoMetallic;
 layout (set = 2, binding = 1) uniform sampler2D gbNormalRoughness;
 layout (set = 2, binding = 2) uniform sampler2D gbDepth;
 layout (set = 2, binding = 3) uniform sampler2D ssaoBuffer;
-layout (set = 2, binding = 4) uniform sampler2DShadow shadowMap; // hardware PCF
+layout (set = 2, binding = 4) uniform sampler2DArrayShadow shadowMap; // hardware PCF, array for CSM
 
 const float PI = 3.14159265359;
 
@@ -74,28 +78,43 @@ vec3 evalBRDF(Surface s, float NdotV, float NdotL, float NdotH, float HdotV) {
     return kD * s.albedo / PI + specular;
 }
 
-/// Returns 1.0 = fully lit, 0.0 = fully shadowed.
-/// Hardware PCF: sampler2DShadow with Linear filter does 2x2 bilinear blend of depth comparisons.
-/// Caller passes vec3(uv, refDepth) — GPU evaluates compareOp per tap and interpolates results.
-float shadowFactor(vec3 worldPos) {
-    vec4 lightClip = ubo.dirLightSpaceMatrix * vec4(worldPos, 1.0);
+/// Returns x = shadow factor (1.0 lit, 0.0 shadowed), y = cascade index (0..NUM_CASCADES-1).
+/// Selects the tightest cascade whose far plane exceeds the fragment's view-space depth, then
+/// samples the corresponding layer of the 2D shadow array with hardware PCF.
+vec2 shadowFactor(vec3 worldPos) {
+    // Camera view-space Z is negative for in-front fragments (RH, camera looks down -Z).
+    // Negate to get a positive linear depth in metres from camera — same units as cascadeSplitDepths.
+    float fragDist = -(ubo.view * vec4(worldPos, 1.0)).z;
+
+    // Pick the finest cascade that covers this fragment; default to the coarsest.
+    int cascade = NUM_CASCADES - 1;
+    for (int i = 0; i < NUM_CASCADES; ++i) {
+        if (fragDist < ubo.cascadeSplitDepths[i]) {
+            cascade = i;
+            break;
+        }
+    }
+
+    vec4 lightClip = ubo.dirLightSpaceMatrices[cascade] * vec4(worldPos, 1.0);
     vec3 proj = lightClip.xyz / lightClip.w;  // orthographic: w=1, but keep general
     vec2 shadowUV = proj.xy * 0.5 + 0.5;     // NDC [-1,1] → UV [0,1]
 
-    // Outside the light frustum → treat as lit
+    // Outside this cascade's light frustum → treat as lit
     if (any(lessThan(shadowUV, vec2(0.0))) || any(greaterThan(shadowUV, vec2(1.0))))
-    return 1.0;
+        return vec2(1.0, float(cascade));
     if (proj.z < 0.0 || proj.z > 1.0)
-    return 1.0;
+        return vec2(1.0, float(cascade));
 
-    // Small bias to counteract residual acne after slope-scaled depth bias in the shadow pass.
-    // Reverse-Z: add bias to push reference toward 1.0 (lit side for eGreaterOrEqual).
-    float bias = 0.002;
-    float currentDepth = proj.z + bias;
+    // Shader-side bias in NDC space. Scale with cascade index so that the world-space dead zone
+    // stays roughly constant: cascade 0 (~5m range) needs less NDC bias than cascade 3 (~140m).
+    // The shadow pass slope-scaled GPU bias handles most self-shadowing; this is just insurance.
+    const float biasScale[4] = float[4](0.0002, 0.0004, 0.0008, 0.0015);
+    float currentDepth = proj.z + biasScale[cascade];
 
-    // texture(sampler2DShadow, vec3) — .z is the reference depth fed to compareOp (eLess).
-    // Returns fraction of the 2x2 footprint where frag depth < stored depth (i.e. lit).
-    return texture(shadowMap, vec3(shadowUV, currentDepth));
+    // texture(sampler2DArrayShadow, vec4) — .z = array layer, .w = reference depth for compareOp.
+    // Hardware PCF returns fraction of the 2x2 footprint that passes the comparison (i.e. lit).
+    float s = texture(shadowMap, vec4(shadowUV, float(cascade), currentDepth));
+    return vec2(s, float(cascade));
 }
 
 /// Reconstruct world-space position from depth buffer + inverse matrices.
@@ -161,6 +180,7 @@ void main() {
     }
 
     // --- Directional light (shadow-mapped) ---
+    int cascadeIdx = 0;  // set by shadowFactor; used by DEBUG_CASCADES tint below
     {
         vec3 L = normalize(-ubo.dirLightDir.xyz); // stored as light→scene; negate for frag→light
         vec3 H = normalize(V + L);
@@ -171,7 +191,9 @@ void main() {
         const float dirLightIntensity = 4.0;
         vec3 radiance = vec3(dirLightIntensity);
 
-        float shadow = shadowFactor(worldPos);
+        vec2  shadowResult = shadowFactor(worldPos);
+        float shadow       = shadowResult.x;
+        cascadeIdx         = int(shadowResult.y);
         Lo += evalBRDF(surf, NdotV, NdotL, NdotH, HdotV) * radiance * NdotL * shadow;
     }
 
@@ -189,6 +211,18 @@ void main() {
 
 
     color = pow(color, vec3(1.0 / 2.2));
+
+#ifdef DEBUG_CASCADES
+    // Tint: cascade 0 = red (nearest), 1 = green, 2 = blue, 3 = yellow
+    vec3 cascadeColors[4] = vec3[4](
+        vec3(1.0, 0.2, 0.2),
+        vec3(0.2, 1.0, 0.2),
+        vec3(0.2, 0.4, 1.0),
+        vec3(1.0, 1.0, 0.2)
+    );
+    color = mix(color, cascadeColors[cascadeIdx], 0.4);
+#endif
+
     outColor = vec4(color, 1.0);
     //    outColor = vec4(vec3(ao), 1.0);
 }

@@ -23,13 +23,58 @@ void ShadowMap::recreate(uint32_t width, uint32_t height) {
 
 void ShadowMap::createImages(uint32_t width, uint32_t height) {
     extent_ = vk::Extent2D{width, height};
-    depth_ = vk_util::AttachmentImage::create(
-        context_.getVmaAllocator(),
-        context_.getDevice(),
-        width, height,
-        DEPTH_FORMAT,
-        vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled,
-        vk::ImageAspectFlagBits::eDepth);
+    auto device = context_.getDevice();
+    auto allocator = context_.getVmaAllocator();
+
+    auto imageInfo = vk::ImageCreateInfo()
+                     .setImageType(vk::ImageType::e2D)
+                     .setFormat(DEPTH_FORMAT)
+                     .setExtent({width, height, 1})
+                     .setMipLevels(1)
+                     .setArrayLayers(engineConfig::NUM_CASCADES)
+                     .setSamples(vk::SampleCountFlagBits::e1)
+                     .setTiling(vk::ImageTiling::eOptimal)
+                     .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment |
+                               vk::ImageUsageFlagBits::eSampled)
+                     .setSharingMode(vk::SharingMode::eExclusive)
+                     .setInitialLayout(vk::ImageLayout::eUndefined);
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    VkImage rawImage{};
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo *>(&imageInfo),
+                       &allocInfo, &rawImage, &depthAlloc_, nullptr) != VK_SUCCESS)
+        throw std::runtime_error("ShadowMap: failed to create cascade depth image");
+    depthImage_ = rawImage;
+
+    // Full array view — sampler2DArrayShadow in lighting.frag
+    depthArrayView_ = device.createImageView(
+        vk::ImageViewCreateInfo()
+        .setImage(depthImage_)
+        .setViewType(vk::ImageViewType::e2DArray)
+        .setFormat(DEPTH_FORMAT)
+        .setSubresourceRange(vk::ImageSubresourceRange()
+                             .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+                             .setBaseMipLevel(0)
+                             .setLevelCount(1)
+                             .setBaseArrayLayer(0)
+                             .setLayerCount(engineConfig::NUM_CASCADES)));
+
+    // Per-layer views — depth attachment for each cascade in DirShadowPass
+    for (uint32_t i = 0; i < engineConfig::NUM_CASCADES; i++) {
+        layerViews_[i] = device.createImageView(
+            vk::ImageViewCreateInfo()
+            .setImage(depthImage_)
+            .setViewType(vk::ImageViewType::e2D)
+            .setFormat(DEPTH_FORMAT)
+            .setSubresourceRange(vk::ImageSubresourceRange()
+                                 .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+                                 .setBaseMipLevel(0)
+                                 .setLevelCount(1)
+                                 .setBaseArrayLayer(i)
+                                 .setLayerCount(1)));
+    }
 }
 
 void ShadowMap::createSampler() {
@@ -43,13 +88,30 @@ void ShadowMap::createSampler() {
                        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
                        .setAnisotropyEnable(false)
                        .setUnnormalizedCoordinates(false)
-                       .setCompareEnable(true)                              // enable hardware PCF
-                       .setCompareOp(vk::CompareOp::eGreaterOrEqual)        // reverse-Z: frag depth >= map depth → lit
+                       .setCompareEnable(true) // enable hardware PCF
+                       .setCompareOp(vk::CompareOp::eGreaterOrEqual) // reverse-Z: frag >= map → lit
                        .setMipmapMode(vk::SamplerMipmapMode::eNearest);
 
     sampler_ = context_.getDevice().createSampler(samplerInfo);
 }
 
 void ShadowMap::cleanup() {
-    depth_.cleanup(context_.getDevice(), context_.getVmaAllocator());
+    auto device = context_.getDevice();
+    auto allocator = context_.getVmaAllocator();
+
+    for (auto &view : layerViews_)
+        if (view) {
+            device.destroyImageView(view);
+            view = nullptr;
+        }
+
+    if (depthArrayView_) {
+        device.destroyImageView(depthArrayView_);
+        depthArrayView_ = nullptr;
+    }
+    if (depthImage_) {
+        vmaDestroyImage(allocator, depthImage_, depthAlloc_);
+        depthImage_ = nullptr;
+        depthAlloc_ = nullptr;
+    }
 }

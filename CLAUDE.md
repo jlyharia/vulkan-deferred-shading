@@ -36,7 +36,7 @@ Favor system-level insight (bandwidth, memory lifetime, GPU trade-offs) over vis
 ### Descriptor layout
 | Set | Binding | Type | Stage | Content |
 |-----|---------|------|-------|---------|
-| 0 | 0 | UBO | vert+frag | GlobalUBO: view, proj, cameraPos, point lights |
+| 0 | 0 | UBO | vert+frag | GlobalUBO: view, proj, invView, invProj, cameraPos, dirLightSpaceMatrices[4], cascadeSplitDepths, dirLightDir, pointLights[24] |
 | 0 | 1 | SSBO | vert | InstanceData[] for instanced sphere draws |
 | 1 | 0-2 | CombinedImageSampler | frag | Albedo, Normal, MetallicRoughness |
 
@@ -68,7 +68,7 @@ Each pass is a plain struct with an `execute(vk::CommandBuffer, ...)` method. No
 | `GeometryPass` | GeometryPass.hpp/cpp | G-buffer fill + gbuffer barrier (producer-side) |
 | `LightingPass` | LightingPass.hpp/cpp | Fullscreen BRDF triangle, writes to swapchain |
 | `OverlayPass` | OverlayPass.hpp/cpp | Light sphere visualization (depth-test-read-only) |
-| `DirShadowPass` | DirShadowPass.hpp/cpp | Renders scene from light POV into shadow map depth image; barriers to shader-read |
+| `DirShadowPass` | DirShadowPass.hpp/cpp | Loops over NUM_CASCADES, renders scene into each cascade layer view with that cascade's light-space matrix |
 | `SsaoPass` | SsaoPass.hpp/cpp | SSAO occlusion at half resolution (width/2 × height/2), 16-sample kernel; owns noise texture + kernel buffer |
 | `SsaoBlurPass` | SsaoBlurPass.hpp/cpp | Bilateral blur over the half-res SSAO buffer |
 
@@ -90,7 +90,23 @@ Frame-level DAG that owns barrier derivation. Wired into the render loop — `re
 2. OverlayPass — instanced light spheres with depth test (read-only), runs after graph
 3. ImGui UI pass
 
-## Current State (2026-05-02)
+### `DirLightView` — cascade frustum computation (`src/scene/DirLightView.hpp/cpp`)
+Fields: `position`, `target`, `shadowFar` (default 200m). No single-cascade ortho fields remain.
+`computeCascades(cameraView, cameraProj, lambda=0.9)` returns `std::array<CascadeData, NUM_CASCADES>`.
+- Extracts FOV and `cameraNear` from projection matrix (`proj[1][1]`, `proj[0][0]`, `proj[3][2]`)
+- Splits camera frustum using Practical Split Scheme (blend of log and uniform via `lambda`)
+- `shadowFar` is independent of the camera's infinite far plane
+- Per cascade: 8 view-space corners → world space → light space → AABB → texel-snap XY → `orthoRH_ZO` + Y-flip + reverse-Z
+- `CascadeData`: `lightSpaceMatrix` (mat4) + `splitDepth` (positive meters from camera)
+
+### `ShadowMap` — cascade array image (`src/vulkan/ShadowMap.hpp/cpp`)
+Owns a single `e2DArray` depth image with `NUM_CASCADES` layers (2048×2048×4, D32Sfloat).
+- `getDepthView()` — full array view (`e2DArray`), bound to lighting shader as `sampler2DArrayShadow`
+- `getLayerView(int i)` — per-layer `e2D` view, used as depth attachment in `DirShadowPass` per cascade
+- Sampler: hardware PCF (`compareEnable=true`, `eGreaterOrEqual`), clamp-to-edge, reverse-Z
+- `AttachmentImage` not used here — image managed directly via VMA (needs `arrayLayers = NUM_CASCADES`)
+
+## Current State (2026-05-12)
 - PBR Cook-Torrance BRDF ✓
 - Deferred rendering (G-buffer + lighting pass) ✓
 - Point lights in GlobalUBO ✓
@@ -107,6 +123,10 @@ Frame-level DAG that owns barrier derivation. Wired into the render loop — `re
 - SSAO at half resolution (16-sample kernel) ✓
 - Debug labels via `VK_EXT_debug_utils` — all graph passes + Overlay + ImGui labeled for RenderDoc/Nsight ✓
 - GPU timestamp queries per pass — `GpuTimestamps` double-buffered query pools, 1-second averaged ImGui table ✓
+- CSM complete (branch `csm`): all 9 steps done
+  - `GlobalUBO` carries `dirLightSpaceMatrices[4]` + `cascadeSplitDepths`; `DirShadowPass` renders 4 cascade layers
+  - `lighting.frag`: `sampler2DArrayShadow`, cascade selection by camera-view-space depth, array sample with hardware PCF
+  - Descriptor binding 4 uses `depthArrayView_` (e2DArray) + compare sampler; `eCombinedImageSampler` unchanged
 
 ## Roadmap
 1. ~~Deferred rendering (G-buffer + lighting pass)~~ ✓
@@ -116,4 +136,5 @@ Frame-level DAG that owns barrier derivation. Wired into the render loop — `re
 5. ~~Reversed Z + infinite far plane~~ ✓
 6. ~~Debug labels (RenderDoc/Nsight pass naming)~~ ✓
 7. ~~GPU timestamp queries per pass~~ ✓
-8. Technical README
+8. Cascaded shadow maps (in progress)
+9. Technical README
