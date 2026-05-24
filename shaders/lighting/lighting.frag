@@ -78,15 +78,79 @@ vec3 evalBRDF(Surface s, float NdotV, float NdotL, float NdotH, float HdotV) {
     return kD * s.albedo / PI + specular;
 }
 
-/// Returns x = shadow factor (1.0 lit, 0.0 shadowed), y = cascade index (0..NUM_CASCADES-1).
-/// Selects the tightest cascade whose far plane exceeds the fragment's view-space depth, then
-/// samples the corresponding layer of the 2D shadow array with hardware PCF.
+///// Returns x = shadow factor (1.0 lit, 0.0 shadowed), y = cascade index (0..NUM_CASCADES-1).
+///// Selects the tightest cascade whose far plane exceeds the fragment's view-space depth, then
+///// samples the corresponding layer of the 2D shadow array with hardware PCF.
+//vec2 shadowFactor(vec3 worldPos) {
+//    // Camera view-space Z is negative for in-front fragments (RH, camera looks down -Z).
+//    // Negate to get a positive linear depth in metres from camera — same units as cascadeSplitDepths.
+//    float fragDist = -(ubo.view * vec4(worldPos, 1.0)).z;
+//
+//    // Pick the finest cascade that covers this fragment; default to the coarsest.
+//    int cascade = NUM_CASCADES - 1;
+//    for (int i = 0; i < NUM_CASCADES; ++i) {
+//        if (fragDist < ubo.cascadeSplitDepths[i]) {
+//            cascade = i;
+//            break;
+//        }
+//    }
+//
+//    vec4 lightClip = ubo.dirLightSpaceMatrices[cascade] * vec4(worldPos, 1.0);
+//    vec3 proj = lightClip.xyz / lightClip.w;  // orthographic: w=1, but keep general
+//    vec2 shadowUV = proj.xy * 0.5 + 0.5;     // NDC [-1,1] → UV [0,1]
+//
+//    // Outside this cascade's light frustum → treat as lit
+//    if (any(lessThan(shadowUV, vec2(0.0))) || any(greaterThan(shadowUV, vec2(1.0))))
+//        return vec2(1.0, float(cascade));
+//    if (proj.z < 0.0 || proj.z > 1.0)
+//        return vec2(1.0, float(cascade));
+//
+//    // Shader-side bias in NDC space. Scale with cascade index so that the world-space dead zone
+//    // stays roughly constant: cascade 0 (~5m range) needs less NDC bias than cascade 3 (~140m).
+//    // The shadow pass slope-scaled GPU bias handles most self-shadowing; this is just insurance.
+//    const float biasScale[4] = float[4](0.0002, 0.0004, 0.0008, 0.0015);
+//    float currentDepth = proj.z + biasScale[cascade];
+//
+//    // texture(sampler2DArrayShadow, vec4) — .z = array layer, .w = reference depth for compareOp.
+//    // Hardware PCF returns fraction of the 2x2 footprint that passes the comparison (i.e. lit).
+//    float s = texture(shadowMap, vec4(shadowUV, float(cascade), currentDepth));
+//    return vec2(s, float(cascade));
+//}
+
+/// Define arrays at global scope
+const float biasScale[4] = float[4](0.0002, 0.0004, 0.0008, 0.0015);
+
+// Safely extracts dynamic scalar components from the ubo.cascadeSplitDepths vec4 container
+float getCascadeSplitDepth(int index) {
+    if (index == 0) return ubo.cascadeSplitDepths.x;
+    if (index == 1) return ubo.cascadeSplitDepths.y;
+    if (index == 2) return ubo.cascadeSplitDepths.z;
+    return ubo.cascadeSplitDepths.w;
+}
+
+// Standard GLSL Helper Function
+float getShadowAmount(vec3 worldPos, int cascadeIdx) {
+    vec4 lightClip = ubo.dirLightSpaceMatrices[cascadeIdx] * vec4(worldPos, 1.0);
+    vec3 proj = lightClip.xyz / lightClip.w;
+    vec2 shadowUV = proj.xy * 0.5 + 0.5;
+
+    // Clip bounds check
+    if (any(lessThan(shadowUV, vec2(0.0))) || any(greaterThan(shadowUV, vec2(1.0))) ||
+    proj.z < 0.0 || proj.z > 1.0) {
+        return 1.0;
+    }
+
+    float currentDepth = proj.z - biasScale[cascadeIdx]; // Reverse-Z subtractive bias
+    return texture(shadowMap, vec4(shadowUV, float(cascadeIdx), currentDepth));
+}
+
 vec2 shadowFactor(vec3 worldPos) {
-    // Camera view-space Z is negative for in-front fragments (RH, camera looks down -Z).
-    // Negate to get a positive linear depth in metres from camera — same units as cascadeSplitDepths.
     float fragDist = -(ubo.view * vec4(worldPos, 1.0)).z;
 
-    // Pick the finest cascade that covers this fragment; default to the coarsest.
+    if (fragDist > getCascadeSplitDepth(NUM_CASCADES - 1)) {
+        return vec2(1.0, float(NUM_CASCADES - 1));
+    }
+
     int cascade = NUM_CASCADES - 1;
     for (int i = 0; i < NUM_CASCADES; ++i) {
         if (fragDist < ubo.cascadeSplitDepths[i]) {
@@ -95,25 +159,24 @@ vec2 shadowFactor(vec3 worldPos) {
         }
     }
 
-    vec4 lightClip = ubo.dirLightSpaceMatrices[cascade] * vec4(worldPos, 1.0);
-    vec3 proj = lightClip.xyz / lightClip.w;  // orthographic: w=1, but keep general
-    vec2 shadowUV = proj.xy * 0.5 + 0.5;     // NDC [-1,1] → UV [0,1]
+    // Call the global helper function
+    float s = getShadowAmount(worldPos, cascade);
 
-    // Outside this cascade's light frustum → treat as lit
-    if (any(lessThan(shadowUV, vec2(0.0))) || any(greaterThan(shadowUV, vec2(1.0))))
-        return vec2(1.0, float(cascade));
-    if (proj.z < 0.0 || proj.z > 1.0)
-        return vec2(1.0, float(cascade));
+    // Cascade Blending
+    if (cascade < NUM_CASCADES - 1) {
+        float nextSplit = getCascadeSplitDepth(cascade);
+        float distToNextSplit = nextSplit - fragDist;
+        float blendRange = 3.0;
 
-    // Shader-side bias in NDC space. Scale with cascade index so that the world-space dead zone
-    // stays roughly constant: cascade 0 (~5m range) needs less NDC bias than cascade 3 (~140m).
-    // The shadow pass slope-scaled GPU bias handles most self-shadowing; this is just insurance.
-    const float biasScale[4] = float[4](0.0002, 0.0004, 0.0008, 0.0015);
-    float currentDepth = proj.z + biasScale[cascade];
+        if (distToNextSplit < blendRange) {
+            float blendWeight = 1.0 - (distToNextSplit / blendRange);
 
-    // texture(sampler2DArrayShadow, vec4) — .z = array layer, .w = reference depth for compareOp.
-    // Hardware PCF returns fraction of the 2x2 footprint that passes the comparison (i.e. lit).
-    float s = texture(shadowMap, vec4(shadowUV, float(cascade), currentDepth));
+            // Call it again for the next layer
+            float nextCascadeShadow = getShadowAmount(worldPos, cascade + 1);
+            s = mix(s, nextCascadeShadow, blendWeight);
+        }
+    }
+
     return vec2(s, float(cascade));
 }
 
@@ -191,9 +254,9 @@ void main() {
         const float dirLightIntensity = 4.0;
         vec3 radiance = vec3(dirLightIntensity);
 
-        vec2  shadowResult = shadowFactor(worldPos);
-        float shadow       = shadowResult.x;
-        cascadeIdx         = int(shadowResult.y);
+        vec2 shadowResult = shadowFactor(worldPos);
+        float shadow = shadowResult.x;
+        cascadeIdx = int(shadowResult.y);
         Lo += evalBRDF(surf, NdotV, NdotL, NdotH, HdotV) * radiance * NdotL * shadow;
     }
 
@@ -212,16 +275,16 @@ void main() {
 
     color = pow(color, vec3(1.0 / 2.2));
 
-#ifdef DEBUG_CASCADES
+    #ifdef DEBUG_CASCADES
     // Tint: cascade 0 = red (nearest), 1 = green, 2 = blue, 3 = yellow
     vec3 cascadeColors[4] = vec3[4](
-        vec3(1.0, 0.2, 0.2),
-        vec3(0.2, 1.0, 0.2),
-        vec3(0.2, 0.4, 1.0),
-        vec3(1.0, 1.0, 0.2)
+    vec3(1.0, 0.2, 0.2),
+    vec3(0.2, 1.0, 0.2),
+    vec3(0.2, 0.4, 1.0),
+    vec3(1.0, 1.0, 0.2)
     );
     color = mix(color, cascadeColors[cascadeIdx], 0.4);
-#endif
+    #endif
 
     outColor = vec4(color, 1.0);
     //    outColor = vec4(vec3(ao), 1.0);

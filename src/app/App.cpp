@@ -77,6 +77,11 @@ void App::initVulkan() {
 }
 
 void App::loadScene() {
+    if (useCsmDebugScene_) {
+        loadCsmDebugScene();
+        return;
+    }
+
     auto sponzaMesh = assetManager_->loadModel("assets/model/sponza_palace/scene.gltf");
 
     MeshInstance sponzaInstance;
@@ -89,6 +94,40 @@ void App::loadScene() {
     renderObjects_.push_back(sponzaInstance);
 
     loadPointLights();
+}
+
+void App::loadCsmDebugScene() {
+    // Light from behind/above the default camera (which looks +X from origin),
+    // so the cylinder fronts face toward the light and show curvature shading.
+    dirLight_.position = glm::vec3(-20.0f, -20.0f, 50.0f);
+    dirLight_.target   = glm::vec3(50.0f,  0.0f,  -15.0f);
+
+    auto floorMesh    = assetManager_->loadModel("assets/model/floor/checkered_tile_floor.glb");
+    auto cylinderMesh = assetManager_->loadModel("assets/model/cylinder/cylinder.glb");
+
+    MeshInstance floor;
+    floor.mesh = floorMesh;
+    floor.name = "CsmDebug_Floor";
+    floor.transform.setScale(glm::vec3(1.0f, 1.0f, 1.0f));
+    floor.transform.setRotation(glm::vec3(90.0f, 0.0f, 0.0f));
+    floor.transform.setPosition(glm::vec3(40.0f, 0.0f, -20.0f));
+    floor.transform.updateMatrix();
+    renderObjects_.push_back(floor);
+
+    // Cylinders straddling each cascade split (Z-up world: lined up along +Y)
+    // Cascade far planes ~5 / 25 / 80 / 200 m with shadowFar=200, lambda=0.9
+    const float xPos[4] = { -10.0f, 15.0f, 50.0f, 130.0f };
+    for (int i = 0; i < 4; ++i) {
+        MeshInstance cyl;
+        cyl.mesh = cylinderMesh;
+        cyl.name = "CsmDebug_Cylinder_" + std::to_string(i);
+        cyl.transform.setRotation(glm::vec3(90.0f, 0.0f, 0.0f));
+        cyl.transform.setPosition(glm::vec3(xPos[i], 0.0f , -10.0f));
+        cyl.transform.setScale(glm::vec3(0.05f, 0.5f, 0.05f));
+
+        cyl.transform.updateMatrix();
+        renderObjects_.push_back(cyl);
+    }
 }
 
 void App::loadPointLights() {
