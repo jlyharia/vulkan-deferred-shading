@@ -21,6 +21,8 @@ struct CascadeData {
 struct DirLightView {
     glm::vec3 position = glm::vec3(10.0f, 10.0f, 20.0f);
     glm::vec3 target = glm::vec3(0.0f);
+    // glm::vec3 position = glm::vec3(-14.0f, 36.0f, 45.0f);
+    // glm::vec3 target = glm::vec3(0.0f, -24.0f, -16.0f);
     float shadowFar = 200.0f;
 
     [[nodiscard]] glm::mat4 viewMatrix() const {

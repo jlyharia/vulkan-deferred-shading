@@ -36,12 +36,15 @@ void main() {
     vec3 N = normalize(fragNormal);
     if (!gl_FrontFacing) N = -N;
 
-    vec3 T = normalize(inTangent.xyz);
-    vec3 B = cross(N, T) * inTangent.w;
-    mat3 TBN = mat3(T, B, N);
-
-    vec3 localNormal = texture(normalMap, fragTexCoord).rgb * 2.0 - 1.0;
-    N = normalize(TBN * normalize(localNormal));
+    // Only apply normal map when tangent data is present. normalize(vec3(0)) is
+    // undefined — can produce NaN on some drivers — so guard with a length check.
+    if (dot(inTangent.xyz, inTangent.xyz) > 1e-6) {
+        vec3 T = normalize(inTangent.xyz);
+        vec3 B = cross(N, T) * inTangent.w;
+        mat3 TBN = mat3(T, B, N);
+        vec3 localNormal = texture(normalMap, fragTexCoord).rgb * 2.0 - 1.0;
+        N = normalize(TBN * normalize(localNormal));
+    }
 
     // --- Write G-buffer ---
     outAlbedoMetallic  = vec4(albedo, metallic);

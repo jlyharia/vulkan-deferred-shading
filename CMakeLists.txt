@@ -119,6 +119,7 @@ add_executable(${TARGET_NAME}
         src/renderer/passes/graph/CompiledPass.hpp
         src/renderer/passes/graph/RGTextureAccess.hpp
         src/renderer/passes/graph/TextureState.hpp
+        src/scene/DirLightView.cpp
 )
 
 # ------------------------------------------------------------

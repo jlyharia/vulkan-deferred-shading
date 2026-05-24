@@ -72,6 +72,7 @@ private:
     void accumulateGpuTimings();
     void loadScene();
     void loadPointLights();
+    void loadCsmDebugScene();
 
     // State variables for time tracking
     std::chrono::high_resolution_clock::time_point lastTime;
@@ -88,7 +89,8 @@ private:
     float                                        gpuTimer_       = 0.0f;
     std::vector<UserInterface::GpuTimingEntry>   avgGpuTimings_;
 
-    bool framebufferResized_ = false;
+    bool framebufferResized_  = false;
+    bool useCsmDebugScene_    = false; // flip to true to load floor+cylinders instead of Sponza
 
     void renderUI() const;
     void processInput();
