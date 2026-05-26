@@ -93,10 +93,10 @@ Frame-level DAG that owns barrier derivation. Wired into the render loop — `re
 ### `DirLightView` — cascade frustum computation (`src/scene/DirLightView.hpp/cpp`)
 Fields: `position`, `target`, `shadowFar` (default 200m). No single-cascade ortho fields remain.
 `computeCascades(cameraView, cameraProj, lambda=0.9)` returns `std::array<CascadeData, NUM_CASCADES>`.
-- Extracts FOV and `cameraNear` from projection matrix (`proj[1][1]`, `proj[0][0]`, `proj[3][2]`)
-- Splits camera frustum using Practical Split Scheme (blend of log and uniform via `lambda`)
-- `shadowFar` is independent of the camera's infinite far plane
-- Per cascade: 8 view-space corners → world space → light space → AABB → texel-snap XY → `orthoRH_ZO` + Y-flip + reverse-Z
+Implemented via three anonymous-namespace helpers:
+- `calculateSplitDistances` — Practical Split Scheme (blend of log + uniform via `lambda`); `shadowFar` independent of camera's infinite far plane
+- `computeBoundingSphere` — 8 view-space corners → world → light space → bounding sphere; radius quantised to `ceil(r*16)/16` to suppress sub-pixel scale ripple; XY texel-snapped
+- `computeCascadeMatrix` — explicit right/up frame from `lightDir × Z-up` (no dependency on look-at position/target); Z-extents padded ±100 m (static constant); `orthoRH_ZO` + Y-flip + reverse-Z
 - `CascadeData`: `lightSpaceMatrix` (mat4) + `splitDepth` (positive meters from camera)
 
 ### `ShadowMap` — cascade array image (`src/vulkan/ShadowMap.hpp/cpp`)
@@ -106,7 +106,7 @@ Owns a single `e2DArray` depth image with `NUM_CASCADES` layers (2048×2048×4, 
 - Sampler: hardware PCF (`compareEnable=true`, `eGreaterOrEqual`), clamp-to-edge, reverse-Z
 - `AttachmentImage` not used here — image managed directly via VMA (needs `arrayLayers = NUM_CASCADES`)
 
-## Current State (2026-05-12)
+## Current State (2026-05-24)
 - PBR Cook-Torrance BRDF ✓
 - Deferred rendering (G-buffer + lighting pass) ✓
 - Point lights in GlobalUBO ✓
@@ -123,10 +123,15 @@ Owns a single `e2DArray` depth image with `NUM_CASCADES` layers (2048×2048×4, 
 - SSAO at half resolution (16-sample kernel) ✓
 - Debug labels via `VK_EXT_debug_utils` — all graph passes + Overlay + ImGui labeled for RenderDoc/Nsight ✓
 - GPU timestamp queries per pass — `GpuTimestamps` double-buffered query pools, 1-second averaged ImGui table ✓
-- CSM complete (branch `csm`): all 9 steps done
+- CSM complete ✓
   - `GlobalUBO` carries `dirLightSpaceMatrices[4]` + `cascadeSplitDepths`; `DirShadowPass` renders 4 cascade layers
-  - `lighting.frag`: `sampler2DArrayShadow`, cascade selection by camera-view-space depth, array sample with hardware PCF
+  - `lighting.frag`: `sampler2DArrayShadow`, cascade selection by camera-view-space depth, hardware PCF via `getShadowAmount` helper
+  - Cascade blending: 3 m blend zone at each split boundary lerps adjacent cascade shadow factor to hide seams — prevents abrupt shadow changes as objects cross cascade boundaries; screenshot `demo/csm/csm-with-overlap-blending-zone.webp`
+  - Shadow bias: per-cascade `biasScale[4]` array, subtractive (reverse-Z); `getShadowAmount` is a standalone GLSL helper
   - Descriptor binding 4 uses `depthArrayView_` (e2DArray) + compare sampler; `eCombinedImageSampler` unchanged
+  - `loadCsmDebugScene()` in `App`: checkered floor + 4 cylinders placed at cascade-split distances; toggled by `useCsmDebugScene_` (default false)
+  - Cascade debug tint: each cascade tinted a distinct color to visualize coverage boundaries; screenshot `demo/csm/tinted-csm-distinct-color.webp`
+  - G-buffer TBN guarded against zero-length tangents (NaN fix for meshes without tangent data)
 
 ## Roadmap
 1. ~~Deferred rendering (G-buffer + lighting pass)~~ ✓
@@ -136,5 +141,5 @@ Owns a single `e2DArray` depth image with `NUM_CASCADES` layers (2048×2048×4, 
 5. ~~Reversed Z + infinite far plane~~ ✓
 6. ~~Debug labels (RenderDoc/Nsight pass naming)~~ ✓
 7. ~~GPU timestamp queries per pass~~ ✓
-8. Cascaded shadow maps (in progress)
+8. ~~Cascaded shadow maps~~ ✓
 9. Technical README

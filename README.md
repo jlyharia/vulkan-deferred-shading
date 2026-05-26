@@ -20,9 +20,9 @@ A Vulkan 1.3 deferred shading renderer built from scratch in C++23. Five render 
 |---|---|
 | ![blur on](demo/ssaoblur/ssaoOutput_with_blur.jpg) | ![blur off](demo/ssaoblur/ssaoOutput_without_blur.jpg) |
 
-| CSM (4 cascades, PCF) | Cascade debug tint |
-|---|---|
-| ![csm](demo/csm/csm_shadow_move1.webp) | ![cascade tint](demo/csm/csm_shadow_move2.webp) |
+| CSM (4 cascades, PCF) | Cascade debug tint | Cascade blend zone |
+|---|---|---|
+| ![csm](demo/csm/csm_shadow_move1.webp) | ![cascade tint](demo/csm/tinted-csm-distinct-color.webp) | ![blend zone](demo/csm/csm-with-overlap-blending-zone.webp) |
 
 ---
 
@@ -104,6 +104,8 @@ float radius   = max corner distance from frustum centroid;
 float texelSize = 2.0f * radius / SHADOW_MAP_SIZE;     // constant
 float cx        = floor(center.x / texelSize) * texelSize;  // stable grid
 ```
+
+**Cascade blending.** A hard cascade boundary produces a visible seam: the shadow factor jumps abruptly as a fragment crosses from one cascade to the next, because adjacent cascades have different texel densities and projection matrices. The fix is a blend zone at each split boundary. Within that zone, the shader evaluates shadow lookup in both the near and far cascade and lerps between them based on how far the fragment is into the zone. The seam disappears because both shadow values are PCF-filtered and the transition is continuous.
 
 **Cascade selection in the shader.** `fragDist = -viewPos.z` gives a positive linear depth from the camera. The first cascade whose far plane exceeds `fragDist` wins. The shadow map is a `sampler2DArrayShadow` (a single 2048×2048×4 image array); the selected cascade index becomes the `.z` component of the `texture()` lookup, so hardware PCF runs on the correct layer with one call.
 
