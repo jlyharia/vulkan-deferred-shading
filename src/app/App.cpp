@@ -82,6 +82,16 @@ void App::loadScene() {
         return;
     }
 
+    loadSponzaScene();
+
+    if (useMultipleSphereScene_) {
+        loadMultipleSphereScene();
+    }
+
+    loadPointLights();
+}
+
+void App::loadSponzaScene() {
     auto sponzaMesh = assetManager_->loadModel("assets/model/sponza_palace/scene.gltf");
 
     MeshInstance sponzaInstance;
@@ -92,10 +102,27 @@ void App::loadScene() {
     sponzaInstance.transform.setPosition(glm::vec3(7.0f, 1.5f, -4.0f));
     sponzaInstance.transform.updateMatrix();
     renderObjects_.push_back(sponzaInstance);
-
-    loadPointLights();
 }
+void App::loadMultipleSphereScene() {
+    auto sphereMesh = assetManager_->loadModel("assets/model/basic/sphere.glb");
 
+    constexpr int gridSize = 12;
+    constexpr float spacing = 3.5f;
+    for (int x = 0; x < gridSize; ++x) {
+        for (int y = 0; y < gridSize; ++y) {
+            MeshInstance obj;
+            obj.mesh = sphereMesh;
+            obj.name = "FrustumDebug_" + std::to_string(x) + "_" + std::to_string(y);
+            obj.transform.setPosition(glm::vec3(
+                (x - gridSize / 2) * spacing + 7.0f,
+                (y - gridSize / 2) * spacing + 1.5f,
+                0.5f));
+            obj.transform.setScale(glm::vec3(0.03f));
+            obj.transform.updateMatrix();
+            renderObjects_.push_back(obj);
+        }
+    }
+}
 void App::loadCsmDebugScene() {
     // Light from behind/above the default camera (which looks +X from origin),
     // so the cylinder fronts face toward the light and show curvature shading.

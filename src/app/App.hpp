@@ -73,7 +73,8 @@ private:
     void loadScene();
     void loadPointLights();
     void loadCsmDebugScene();
-
+    void loadMultipleSphereScene();
+    void loadSponzaScene();
     // State variables for time tracking
     std::chrono::high_resolution_clock::time_point lastTime;
     float timer            = 0.0f;
@@ -91,7 +92,11 @@ private:
 
     bool framebufferResized_  = false;
     bool useCsmDebugScene_    = false; // flip to true to load floor+cylinders instead of Sponza
-
+    /*
+     * use to check GPU frustum culling
+     * true - turn on multiple sphere
+     */
+    bool useMultipleSphereScene_ = true;
     void renderUI() const;
     void processInput();
     void update(float dt);

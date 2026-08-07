@@ -24,7 +24,7 @@ void main() {
     if (albedoSample.a < 0.1)
         discard;
 
-    // Store sRGB albedo as-is; decode to linear in the lighting pass
+    // Albedo is already linear: VK_FORMAT_R8G8B8A8_SRGB → hardware sRGB→linear decode on sample
     vec3 albedo = albedoSample.rgb;
 
     // glTF: R=occlusion, G=roughness, B=metallic
