@@ -590,7 +590,7 @@ void Renderer::createUniformBuffers() {
     }
 }
 
-static constexpr uint32_t MAX_INSTANCES = 64;
+static constexpr uint32_t MAX_INSTANCES = 256;
 
 void Renderer::createInstanceBuffers() {
     const vk::DeviceSize bufferSize = MAX_INSTANCES * sizeof(InstanceData);
@@ -699,7 +699,7 @@ void Renderer::createDescriptorSets() {
         auto ssboInfo = vk::DescriptorBufferInfo()
                         .setBuffer(instanceBuffers_[i])
                         .setOffset(0)
-                        .setRange(64 * sizeof(InstanceData));
+                        .setRange(MAX_INSTANCES * sizeof(InstanceData));
 
         std::array<vk::WriteDescriptorSet, 2> writes = {
             vk::WriteDescriptorSet()

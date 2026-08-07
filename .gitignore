@@ -5,3 +5,5 @@ CMakeUserPresets.json
 conan_provider.cmake
 *.rdc
 claude/local/
+CLAUDE.md
+.codewhale/
